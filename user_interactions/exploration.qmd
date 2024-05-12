@@ -1,0 +1,40 @@
+---
+title: "reading_dataset"
+format: html
+editor: visual
+---
+
+# Imports
+
+## Packages
+```{r}
+library(ggplot2)
+library(igraph)
+```
+
+
+## Dataset
+```{r}
+getwd()
+contributions = read.csv("data/sample/examples/preprocessed/contributions.csv", header=T, as.is=T)
+dependencies = read.csv("data/sample/examples/preprocessed/dependencies.csv", header=T, as.is=T)
+usage = read.csv("data/sample/examples/preprocessed/usage.csv", header=T, as.is=T)
+```
+
+# Preliminary exploration of the dataset
+
+Tables attributes and values:
+```{r}
+head(contributions)
+```
+
+```{r}
+head(dependencies)
+```
+```{r}
+head(usage)
+```
+```{r}
+ggplot(usage) 
+```
+
