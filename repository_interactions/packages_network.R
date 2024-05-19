@@ -13,6 +13,7 @@ setwd(data_dir)
 library(igraph)
 library(ggplot2)
 library(dplyr)
+library(data.table)
 
 rm(list = ls()) #clear the workspace
 
@@ -182,6 +183,132 @@ for(month in months){
        col = "skyblue",
        border = "black")
 }
+
+########################## let's visualize the full network of denpendencies: 
+packages_deps = read.csv('package_dependencies.csv')
+class(packages_deps)
+head(packages_deps)
+packages_deps = data.frame("from" = packages_deps$depending_version, 
+                           "to"=packages_deps$depending_on_package, stringsAsFactors = F)
+head(packages_deps)
+nrow(packages_deps) # 6263, we need to simplify (remove multiple edges and loops)
+full_network = graph_from_data_frame(packages_deps, directed=T)
+simplify(full_network, remove.multiple = T, remove.loops = T)
+plot(full_network, 
+     layout = layout_algorithm, 
+     vertex.color = node_color, 
+     vertex.size = node_size,
+     vertex.label.cex = label_size,
+     vertex.label = NA,
+     edge.color = edge_color,
+     edge.width = edge_width,
+     edge.curved = edge_curvature,
+     edge.arrow.size = 0.1,
+     main = "Dependencies Network Graph",
+     vertex.label.family = "sans",
+     vertex.label.dist = 1, # distance between the node and its label
+     vertex.label.color = "black")
+
+components <- igraph::clusters(full_network, mode="weak")
+biggest_cluster_id <- which.max(components$csize)
+
+# ids
+vert_ids <- V(full_network)[components$membership == biggest_cluster_id]
+
+# subgraph, extract the largest connected component (with 1844 nodes, initially 2744)
+largest_cc = igraph::induced_subgraph(full_network, vert_ids)
+
+
+plot(largest_cc, 
+     #layout = layout_algorithm, 
+     layout = layout.circle(largest_cc),
+     vertex.color = node_color, 
+     vertex.size = node_size,
+     vertex.label.cex = label_size,
+     vertex.label = NA,
+     edge.color = edge_color,
+     edge.width = edge_width,
+     edge.curved = edge_curvature,
+     edge.arrow.size = 0.1,
+     main = "Dependencies Network Graph",
+     vertex.label.family = "sans",
+     vertex.label.dist = 1, # distance between the node and its label
+     vertex.label.color = "black")
+
+full_network.degrees <- degree(full_network)
+full_network.degrees.histogram <- as.data.frame(table(full_network.degrees))
+full_network.degrees.histogram[, 1] <- as.numeric(full_network.degrees.histogram[,1])
+# plot it 
+ggplot(full_network.degrees.histogram, 
+       aes(x = full_network.degrees, y = Freq)) +
+  geom_point() +
+  scale_x_continuous("Degree\n(nodes with this amount of connections)",
+                     breaks = c(1, 3, 10, 30, 100, 300),
+                     trans = "log10") +
+  scale_y_continuous("Frequency\n(how many of them)",
+                     breaks = c(1, 3, 10, 30, 100, 300, 1000),
+                     trans = "log10") +
+  ggtitle("Degree Distribution (log-log)") +
+  theme_bw()
+# hist(degree(largest_cc))
+
+###############contributions analysis################################
+contributions <- read.csv("contributions.csv")
+head(contributions)
+list_bipartite <- list()
+unique_dates <- unique(contributions$timestamp)
+for (date in unique_dates) {
+  contrib <- contributions[contributions$timestamp == date, -1]
+  
+  edges = data.frame("from" = contrib$user_id, "to"=contrib$repo_id, stringsAsFactors = F)
+  
+  g = graph_from_data_frame(edges, directed=F)
+  
+  V(g)$type = V(g)$name %in% edges[, 2]
+  V(g)$color = ifelse(V(g)$type, "salmon", "lightblue") # lightblue for packages
+  # salmon for users (edges[, 2] are user_ids)
+  V(g)$shape <- ifelse(V(g)$type, "circle", "square") #packages square, users circle
+  E(g)$color <- "lightgray"
+  
+  list_bipartite[[date]] <- g
+}
+
+pdf("user_vs_repo_bipartite.pdf") # run just the middle block if you want to
+# plot it directly in Rstudio
+
+g_contrib = list_bipartite[['2020-09-01']]
+
+# a simple plot that is simpler to visualize but works only 
+# when the network is not to big (e.g. Rust in 2014)
+# this is cute to visualize: 
+plot(list_bipartite[['2014-09-01']])
+
+# but this is just a jumble:
+# plot(g_contrib, vertex.label=NA)
+
+# lets use bipartite layout
+plot(g_contrib, vertex.label.cex = 0.2, 
+     vertex.label.color = "black",
+     vertex.label = NA,
+     edge.width=0.5,
+     edges.size = 0.1,
+     vertex.size = 0.1,
+     edge.lty = 2,
+     edge.curved = TRUE,
+     layout=layout_as_bipartite
+)
+
+
+dev.off()
+
+# g <- graph_from_data_frame(df, directed = TRUE, vertices = NULL)
+# plot(g)
+
+
+# plot(graph_list[["2022-06-01"]],layout = layout_with_fr, edge.arrow.size = 0.3)
+# # Simplify the graph before plotting
+# simplified_graph <- simplify(graph_list[["2022-06-01"]], remove.multiple = TRUE, remove.loops = TRUE)
+# plot(simplified_graph, layout = layout_with_graphopt, edge.arrow.size = 0.2, edge.width = 1)
 
 
 
