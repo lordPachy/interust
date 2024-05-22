@@ -4,37 +4,232 @@ format: html
 editor: visual
 ---
 
-# Imports
+# Preliminary code
 
-## Packages
+## Importing packages
+
 ```{r}
 library(ggplot2)
 library(igraph)
+#install.packages('tidyverse')
+library(tidyverse)
+library(data.table)
+#install.packages('anytime')
+library(anytime)
+#install.packages('poweRlaw')
+library(poweRlaw)
+#install.packages('scales')
+library(scales)
+```
+
+# Dataset
+
+##Importing data
+
+```{r}
+data_dir = '/home/pachy/Desktop/ACSAI/interust/data/full/dumps/postgresql/data/'
+files = list.files('/home/pachy/Desktop/ACSAI/interust/data/full/dumps/postgresql/data/')
+#s = 'ciao.csv'
+#str_sub(s, 1, -5)
+for (f in files){
+  table = read.csv(paste(data_dir, f, sep = ''))
+  assign(str_sub(f, 1, -5), setDT(table))
+}
+repositories
+```
+
+## Exploring the data
+
+### Users and identities
+
+```{r}
+identities
+```
+
+```{r}
+users
+```
+
+```{r}
+#| label: Merging on attributes
+user_id_raw = merge.data.table(x = identities, y = users, by.x = 'user_id', by.y = 'id')
+user_id_raw = unique(user_id_raw)
+user_id_raw
+```
+
+Identities and users are the same (bots are the same):
+
+```{r}
+all.equal(user_id_raw$is_bot.x, user_id_raw$is_bot.y)
+```
+
+The attribute identity_types is essentially useless
+
+```{r}
+identity_types
+```
+
+Let's filter out useless attributes from users_id
+
+```{r}
+user_id_raw = user_id_raw[, c('identity_type_id', 'is_bot.y', 'creation_identity_type_id'):=NULL]
+user_id_raw
+```
+
+```{r}
+setnames(user_id_raw, 'is_bot.x', 'is_bot')
+user_id_raw
+```
+
+Let's see how many bots we have
+
+```{r}
+ggplot(user_id_raw, aes(x = is_bot)) + geom_bar()
+```
+
+Not so many.
+
+Let's see how many creation dates we have
+
+```{r}
+created_or_generated = copy(user_id_raw)
+created_or_generated[, birthdate_unknown := created_at=='']
+created_or_generated
+ggplot(created_or_generated, aes(x = birthdate_unknown)) + geom_bar()
+```
+
+Testing datetime formats
+
+```{r}
+#print.POSIXct <- function(x,...)print(format(x,"%Y-%m-%d %H:%M:%S"))
+x <- user_id_raw[id == 8716]$created_at
+x
+x <- as.POSIXct(x, tz=Sys.timezone())
+x
+mode(x)
+y = copy(user_id_raw)
+y[, created_at := anytime(created_at)]
+y
+min(y$created_at, na.rm = TRUE)
+```
+
+Let's do it for real
+
+```{r}
+#| label: Clean user table
+user_id_clean = user_id_raw[, created_at := anytime(created_at)]
+user_id_clean
 ```
 
 
-## Dataset
 ```{r}
-getwd()
-contributions = read.csv("data/sample/examples/preprocessed/contributions.csv", header=T, as.is=T)
-dependencies = read.csv("data/sample/examples/preprocessed/dependencies.csv", header=T, as.is=T)
-usage = read.csv("data/sample/examples/preprocessed/usage.csv", header=T, as.is=T)
+ggplot(user_id_raw, aes(x = year(created_at))) + geom_bar()
 ```
 
-# Preliminary exploration of the dataset
+### Followers
 
-Tables attributes and values:
 ```{r}
-head(contributions)
+followers
 ```
 
 ```{r}
-head(dependencies)
+followers_aggr = copy(followers)
+followers_aggr[, .N, by = followee_id]
+followers_aggr
+```
+
+```{r}
+follower_degree = followers_aggr[, .N, by = followee_id]
+#follower_degree = follower_degree[N > 486]
+ggplot(follower_degree, aes(x = N)) + geom_bar(width = 1000) + scale_y_continuous(trans = 'log10')
+```
+
+Let's check if it fits a power law distribution:
+
+```{r}
+#| label: Power law fitting
+m_m = displ$new(follower_degree$N)
+est = estimate_xmin(m_m)
+est
+```
+
+```{r}
+#| label: Power law fitting
+m_m$setXmin(est)
+plot(m_m)
+lines(m_m, col = 2)
+```
+
+Let's see if it fits:
+```{r}
+#| label: Power law fitting
+parallel::detectCores()
+bs = bootstrap_p(m_m, no_of_sims = 10, threads = 2)
+bs
+```
+Now, on to normal cleaning:
+```{r}
+followers
 ```
 ```{r}
-head(usage)
+followers[, follower_identity_type_id := NULL]
+followers[, created_at := NULL]
+followers
 ```
 ```{r}
-ggplot(usage) 
+number_of_followers = followers[, .N, by = followee_id]
+number_of_followers
+```
+```{r}
+number_of_following = followers[, .N, by = follower_login]
+number_of_following
+max(number_of_following$N)
+```
+### Stars
+```{r}
+stars_row = copy(stars)
+stars_row
+```
+Let's check if login and identity_id coincide:
+```{r}
+user_id[identity == '668b00f5737f27d7c7d0fa67a1241acf']
+```
+A bit of cleaning:
+```{r}
+stars_clean = stars_row[, starred_at := anytime(starred_at)]
+stars_clean[, identity_type_id := NULL]
+stars_clean
+```
+```{r}
+user_stars = merge.data.table(x = user_id_clean, y = stars_clean, by.x = 'identity', by.y = 'login')
+user_stars = unique(user_stars)
+user_stars
+```
+```{r}
+all.equal(user_stars$id, user_stars$identity_id)
+```
+Let's see how many stars do they put:
+```{r}
+user_stars_nobot = user_stars[is_bot == F]
+user_stars_nobot = user_stars[, .N, by = identity]
+user_stars_nobot
+ggplot(user_stars_nobot[N<2000], aes(x = N)) + geom_density() + scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
+```
+Let's change the visualization:
+```{r}
+t = new_transform(name = 'x', function(x) log(x, base = exp(1)), function(x) exp(x))
+ggplot(user_stars_nobot[N<2000], aes(x = N)) + geom_density() + scale_y_continuous(trans = t)
+```
+Let's try to fit a power law:
+```{r}
+#| label: Power law fitting
+user_stars_nobot
+m = displ$new(user_stars_nobot$N)
+est = estimate_xmin(m)
+est
+m$setXmin(est)
+bootstrap_p(m, no_of_sims = 10, threads = 4)
+
+
 ```
 
