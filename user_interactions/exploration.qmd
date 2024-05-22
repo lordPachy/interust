@@ -22,9 +22,7 @@ library(poweRlaw)
 library(scales)
 ```
 
-# Dataset
-
-##Importing data
+## Importing data
 
 ```{r}
 data_dir = '/home/pachy/Desktop/ACSAI/interust/data/full/dumps/postgresql/data/'
@@ -38,9 +36,9 @@ for (f in files){
 repositories
 ```
 
-## Exploring the data
+# Cleaning data
 
-### Users and identities
+## Users and identities
 
 ```{r}
 identities
@@ -52,15 +50,15 @@ users
 
 ```{r}
 #| label: Merging on attributes
-user_id_raw = merge.data.table(x = identities, y = users, by.x = 'user_id', by.y = 'id')
-user_id_raw = unique(user_id_raw)
-user_id_raw
+users_raw = merge.data.table(x = identities, y = users, by.x = 'user_id', by.y = 'id')
+users_raw = unique(users_raw)
+users_raw
 ```
 
 Identities and users are the same (bots are the same):
 
 ```{r}
-all.equal(user_id_raw$is_bot.x, user_id_raw$is_bot.y)
+all.equal(users_raw$is_bot.x, users_raw$is_bot.y)
 ```
 
 The attribute identity_types is essentially useless
@@ -72,31 +70,10 @@ identity_types
 Let's filter out useless attributes from users_id
 
 ```{r}
-user_id_raw = user_id_raw[, c('identity_type_id', 'is_bot.y', 'creation_identity_type_id'):=NULL]
-user_id_raw
+users_raw = users_raw[, c('identity_type_id', 'is_bot.y', 'creation_identity_type_id'):=NULL]
+users_raw
 ```
 
-```{r}
-setnames(user_id_raw, 'is_bot.x', 'is_bot')
-user_id_raw
-```
-
-Let's see how many bots we have
-
-```{r}
-ggplot(user_id_raw, aes(x = is_bot)) + geom_bar()
-```
-
-Not so many.
-
-Let's see how many creation dates we have
-
-```{r}
-created_or_generated = copy(user_id_raw)
-created_or_generated[, birthdate_unknown := created_at=='']
-created_or_generated
-ggplot(created_or_generated, aes(x = birthdate_unknown)) + geom_bar()
-```
 
 Testing datetime formats
 
@@ -117,26 +94,473 @@ Let's do it for real
 
 ```{r}
 #| label: Clean user table
-user_id_clean = user_id_raw[, created_at := anytime(created_at)]
-user_id_clean
+users_clean = users_raw[, created_at := anytime(created_at)]
+users_clean
 ```
 
+
+## Followers
+
+```{r}
+followers_raw = copy(followers)
+followers_raw
+```
+
+```{r}
+followers_clean = followers_raw[, follower_identity_type_id := NULL]
+followers_clean = followers_raw[, created_at := NULL]
+followers_clean
+```
+
+
+## Stars
+```{r}
+stars_row = copy(stars)
+stars_row
+```
+Let's check if login and identity_id coincide:
+```{r}
+users_clean[identity == '668b00f5737f27d7c7d0fa67a1241acf']
+```
+A bit of cleaning:
+```{r}
+stars_clean = stars_row[, starred_at := anytime(starred_at)]
+stars_clean[, identity_type_id := NULL]
+stars_clean
+```
+
+```{r}
+all.equal(stars_clean$id, stars_clean$identity_id)
+```
+
+## Issues
+
+```{r}
+issues
+issues_raw = copy(issues)
+issues_raw
+```
+```{r}
+issues_clean = issues_raw[, created_at := anytime(created_at)]
+issues_clean = issues_clean[, closed_at := anytime(closed_at)]
+issues_clean = issues_clean[, identity_type_id := NULL]
+issues_clean
+```
+## Issue reactions
+```{r}
+issue_reactions_raw = copy(issue_reactions)
+issue_reactions_raw
+```
+```{r}
+issue_reactions_clean = issue_reactions_raw[, created_at := anytime(created_at)]
+issue_reactions_clean = issue_reactions_clean[, identity_type_id := NULL]
+issue_reactions_clean
+```
+## Issue comments
+```{r}
+issue_comments_raw = copy(issue_comments)
+issue_comments_raw
+```
+```{r}
+issue_comments_clean = issue_comments_raw[, created_at := anytime(created_at)]
+issue_comments_clean = issue_comments_clean[, identity_type_id := NULL]
+issue_comments_clean
+```
+## Issue comment reactions
+```{r}
+issue_comment_reactions_raw = copy(issue_comment_reactions)
+issue_comment_reactions_raw
+```
+```{r}
+issue_comment_reactions_clean = issue_comment_reactions_raw[, created_at := anytime(created_at)]
+issue_comment_reactions_clean = issue_comment_reactions_clean[, identity_type_id := NULL]
+issue_comment_reactions_clean
+```
+## Commits
+
+```{r}
+commits_raw = copy(commits)
+commits_raw
+```
+```{r}
+commits_clean = commits_raw[, ':='(local_created_at = NULL,
+                                   time_offset = NULL,
+                                   original_created_at = NULL,
+                                   local_committed_at = NULL,
+                                   time_offset_committed = NULL,
+                                   original_committed_at = NULL)]
+commits_clean = commits_clean[, ':='(created_at = anytime(created_at),
+                                     committed_at = anytime(committed_at))]
+commits_clean
+```
+
+## Commit comments
+```{r}
+commit_comments_raw = copy(commit_comments)
+commit_comments_raw
+```
+
+```{r}
+commit_comments_clean = commit_comments_raw[, created_at := anytime(created_at)]
+commit_comments_clean = commit_comments_clean[, identity_type_id := NULL]
+commit_comments_clean
+```
+## Commit comment reactions
+```{r}
+commit_comment_reactions_raw = copy(commit_comment_reactions)
+commit_comment_reactions_raw
+```
+```{r}
+commit_comment_reactions_clean = commit_comment_reactions_raw[, created_at := anytime(created_at)]
+commit_comment_reactions_clean = commit_comment_reactions_clean[, identity_type_id := NULL]
+commit_comment_reactions_clean
+```
+## Pull requests
+
+```{r}
+pull_requests_raw = copy(pullrequests)
+pull_requests_raw
+```
+```{r}
+pull_requests_clean = pull_requests_raw[, ':='(pullrequest_title = NULL,
+                                             created_at = anytime(created_at),
+                                             merged_at = anytime(merged_at),
+                                             closed_at = anytime(closed_at),
+                                             identity_type_id = NULL,
+                                             inserted_at = anytime(inserted_at))]
+pull_requests_clean
+```
+## Pull request reactions
+```{r}
+pull_request_reactions_raw = copy(pullrequest_reactions)
+pull_request_reactions_raw
+```
+```{r}
+pull_request_reactions_clean = pull_request_reactions_raw[, ':='(identity_type_id = NULL,
+                                                               created_at = anytime(created_at))]
+pull_request_reactions_clean
+```
+## Pull request comments 
+
+```{r}
+pull_request_comments_raw = copy(pullrequest_comments)
+pull_request_comments_raw
+```
+```{r}
+pull_request_comments_clean = pull_request_comments_raw[, ':='(created_at = anytime(created_at),
+                                                             identity_type_id = NULL)]
+pull_request_comments_clean
+```
+
+## Pull request comment reactions
+
+```{r}
+pull_request_comment_reactions_raw = copy(pullrequest_comment_reactions)
+pull_request_comment_reactions_raw
+```
+```{r}
+pull_request_comment_reactions_clean = pull_request_comment_reactions_raw[, ':='(
+                                                             created_at = anytime(created_at),
+                                                             identity_type_id = NULL)]
+pull_request_comment_reactions_clean
+```
+## Repositories
+```{r}
+repositories_raw = copy(repositories)
+repositories_raw
+```
+```{r}
+repositories_clean = repositories_raw[, ':='(created_at = anytime(created_at),
+                                             latest_commit_time = anytime(latest_commit_time)
+                                             )]
+repositories_clean
+```
+## Watchers
+```{r}
+watchers_raw = copy(watchers)
+watchers_raw
+```
+```{r}
+watchers_clean = watchers_raw[, identity_type_id := NULL]
+watchers_clean
+```
+
+## Forks
+```{r}
+forks_raw = copy(forks)
+forks_raw
+```
+```{r}
+forks_clean = forks_raw[, ':='(forking_repo_id = NULL,
+                               forked_at = anytime(forked_at)
+                               )]
+forks_clean
+```
+## Organization memberships
+
+```{r}
+org_memberships_raw = copy(org_memberships)
+org_memberships_raw
+```
+```{r}
+org_memberships_clean = org_memberships_raw[, ':='(
+  joined_at = NULL,
+  left_at = NULL
+)]
+org_memberships_clean
+```
+## URLs
+```{r}
+urls_clean = copy(urls)
+urls_clean
+```
+
+## Packages
+```{r}
+packages_raw = copy(packages)
+packages_raw
+```
+
+```{r}
+packages_clean = packages_raw[, created_at := anytime(created_at)]
+packages_clean
+```
+## Package versions
+```{r}
+package_versions_raw = copy(package_versions)
+package_versions_raw
+```
+```{r}
+package_versions_clean = package_versions_raw[, created_at := anytime(created_at)]
+package_versions_clean
+```
+
+## Package version downloads
+
+```{r}
+package_version_downloads_clean = copy(package_version_downloads)
+package_version_downloads_clean
+```
+
+
+# Aggregating data
+
+## Followers
+### Number of followers
+
+```{r}
+n_followers = followers[, .N, by = followee_id]
+setnames(n_followers, 'N', 'n_followers')
+n_followers
+```
+### Number of following
+
+```{r}
+n_following = followers[, .N, by = follower_login]
+setnames(n_following, c('follower_login', 'N'), c('login', 'n_following'))
+n_following = n_following[login != '']
+n_following
+```
+
+## Users on repositories
+We can try to match users to repositories through commits.
+```{r}
+users_repos = unique(commits[, .(author_id, repo_id)])
+users_repos
+```
+
+
+## Stars
+### Put
+```{r}
+
+n_stars_put = stars_clean[, .N, by = login]
+setnames(n_stars_put, 'N', 'n_stars_put')
+n_stars_put = n_stars_put[login != '']
+n_stars_put
+```
+
+### Received
+```{r}
+stars_per_repo = stars_clean[, .N, by = repo_id]
+stars_per_repo
+stars_per_user = merge.data.table(
+  x = users_repos,
+  y = stars_per_repo,
+  by.x = 'repo_id',
+  by.y = 'repo_id')
+stars_per_user
+n_stars_received = stars_per_user[, sum(N), by = author_id]
+setnames(n_stars_received, c('author_id', 'V1'), c('id', 'n_stars_received'))
+n_stars_received
+```
+
+## Issues
+
+### Posted by users
+
+```{r}
+
+n_issues_posted = issues_clean[, .N, by = author_login]
+setnames(n_issues_posted, c('author_login', 'N'), c('login', 'n_issues_posted'))
+n_issues_posted = n_issues_posted[login != '']
+n_issues_posted
+```
+### Per repository
+```{r}
+n_issues_per_repo = issues_clean[, .N, by = repo_id]
+setnames(n_issues_per_repo, 'N', 'n_issues_per_repo')
+n_issues_per_repo
+```
+## Issue reactions
+### Put
+```{r}
+n_issue_reactions_put= issue_reactions_clean[, .N, by = author_id]
+setnames(n_issue_reactions_put, c('author_id', 'N'), c('id', 'n_reactions_put'))
+n_issue_reactions_put = remove_missing(n_issue_reactions_put)
+n_issue_reactions_put
+```
+### Received
+```{r}
+reactions_per_issue = merge.data.table(
+  x = issues_clean,
+  y = issue_reactions_clean, 
+  by.x = c('repo_id', 'issue_number'),
+  by.y = c('repo_id', 'issue_number')
+)
+reactions_per_issue
+n_issue_reactions_received = reactions_per_issue[, .N, by = author_login.x]
+setnames(n_issue_reactions_received, c('author_login.x', 'N'), c('login', 'n_issue_reactions_received'))
+n_issue_reactions_received = n_issue_reactions_received[login != '']
+
+n_issue_reactions_received
+```
+## Issue comments
+### Posted
+```{r}
+n_issue_comments_posted= issue_comments_clean[, .N, by = author_login]
+setnames(n_issue_comments_posted, c('author_login', 'N'), c('login', 'n_issue_comments_posted'))
+n_issue_comments_posted = remove_missing(n_issue_comments_posted)
+n_issue_comments_posted = n_issue_comments_posted[login != '']
+n_issue_comments_posted
+```
+### Received
+```{r}
+comments_per_issue = merge.data.table(
+  x = issues_clean,
+  y = issue_comments_clean, 
+  by.x = c('repo_id', 'issue_number'),
+  by.y = c('repo_id', 'issue_number')
+)
+comments_per_issue
+n_issue_comments_received = comments_per_issue[, .N, by = author_login.x]
+setnames(n_issue_comments_received, c('author_login.x', 'N'), c('login', 'n_issue_comments_received'))
+n_issue_comments_received = n_issue_comments_received[login != '']
+n_issue_comments_received
+```
+## Issue comment reactions
+### Put
+```{r}
+n_issue_comment_reactions_put= issue_comment_reactions_clean[, .N, by = author_login]
+setnames(n_issue_comment_reactions_put, c('author_login', 'N'), c('login', 'n_issue_comment_reactions_put'))
+n_issue_comment_reactions_put = remove_missing(n_issue_comment_reactions_put)
+n_issue_comment_reactions_put = n_issue_comment_reactions_put[login != '']
+n_issue_comment_reactions_put
+```
+### Received
+```{r}
+reactions_per_issue_comment = merge.data.table(
+  x = issue_comments_clean,
+  y = issue_comment_reactions_clean, 
+  by.x = c('repo_id', 'issue_number', 'comment_id'),
+  by.y = c('repo_id', 'issue_number', 'comment_id')
+)
+reactions_per_issue_comment
+n_issue_comment_reactions_received = reactions_per_issue_comment[, .N, by = author_login.x]
+setnames(n_issue_comment_reactions_received, c('author_login.x', 'N'), c('login', 'n_issue_comment_reactions_received'))
+n_issue_comment_reactions_received = n_issue_comment_reactions_received[login != '']
+n_issue_comment_reactions_received
+```
+
+## Commits
+```{r}
+n_commits = commits_clean[, .N, by = author_id]
+setnames(n_commits, c('author_id', 'N'), c('id', 'n_commits'))
+n_commits
+```
+## Commit comments
+### Posted
+```{r}
+n_commit_comments_posted= commit_comments_clean[, .N, by = author_login]
+setnames(n_commit_comments_posted, c('author_login', 'N'), c('login', 'n_commit_comments_posted'))
+n_commit_comments_posted = remove_missing(n_commit_comments_posted)
+n_commit_comments_posted = n_commit_comments_posted[login != ""]
+n_commit_comments_posted
+```
+### Received
+```{r}
+comments_per_commit = merge.data.table(
+  x = commits_clean,
+  y = commit_comments_clean, 
+  by.x = c('repo_id', 'id'),
+  by.y = c('repo_id', 'commit_id')
+)
+comments_per_commit
+n_commit_comments_received = comments_per_commit[, .N, by = author_id.x]
+setnames(n_commit_comments_received, c('author_id.x', 'N'), c('id', 'n_commit_comments_received'))
+n_commit_comments_received = remove_missing(n_commit_comments_received)
+n_commit_comments_received
+```
+## Commit comment reactions
+### Put
+```{r}
+n_commit_comment_reactions_put= commit_comment_reactions_clean[, .N, by = author_login]
+setnames(n_commit_comment_reactions_put, c('author_login', 'N'), c('login', 'n_commit_comment_reactions_put'))
+n_commit_comment_reactions_put = remove_missing(n_commit_comment_reactions_put)
+n_commit_comment_reactions_put = n_commit_comment_reactions_put[login != ""]
+n_commit_comment_reactions_put
+```
+### Received
+```{r}
+reaction_per_commit_comment = merge.data.table(
+  x = commit_comments_clean,
+  y = commit_comment_reactions_clean, 
+  by.x = c('repo_id', 'commit_id', 'comment_id'),
+  by.y = c('repo_id', 'commit_id', 'comment_id')
+)
+reaction_per_commit_comment
+n_commit_comment_reactions_received = reaction_per_commit_comment[, .N, by = author_id.x]
+setnames(n_commit_comment_reactions_received, c('author_id.x', 'N'), c('id', 'n_commit_comment_reactions_received'))
+n_commit_comment_reactions_received = remove_missing(n_commit_comment_reactions_received)
+n_commit_comment_reactions_received
+```
+
+# Exploring distributions
+
+## Users
+
+Let's see how many bots we have
+
+```{r}
+ggplot(user_id_raw, aes(x = is_bot)) + geom_bar()
+```
+
+Not so many.
+
+Let's see how many creation dates we have
+
+```{r}
+created_or_generated = copy(user_id_raw)
+created_or_generated[, birthdate_unknown := created_at=='']
+created_or_generated
+ggplot(created_or_generated, aes(x = birthdate_unknown)) + geom_bar()
+```
 
 ```{r}
 ggplot(user_id_raw, aes(x = year(created_at))) + geom_bar()
 ```
 
-### Followers
-
-```{r}
-followers
-```
-
-```{r}
-followers_aggr = copy(followers)
-followers_aggr[, .N, by = followee_id]
-followers_aggr
-```
+## Followers
 
 ```{r}
 follower_degree = followers_aggr[, .N, by = followee_id]
@@ -167,47 +591,7 @@ parallel::detectCores()
 bs = bootstrap_p(m_m, no_of_sims = 10, threads = 2)
 bs
 ```
-Now, on to normal cleaning:
-```{r}
-followers
-```
-```{r}
-followers[, follower_identity_type_id := NULL]
-followers[, created_at := NULL]
-followers
-```
-```{r}
-number_of_followers = followers[, .N, by = followee_id]
-number_of_followers
-```
-```{r}
-number_of_following = followers[, .N, by = follower_login]
-number_of_following
-max(number_of_following$N)
-```
-### Stars
-```{r}
-stars_row = copy(stars)
-stars_row
-```
-Let's check if login and identity_id coincide:
-```{r}
-user_id[identity == '668b00f5737f27d7c7d0fa67a1241acf']
-```
-A bit of cleaning:
-```{r}
-stars_clean = stars_row[, starred_at := anytime(starred_at)]
-stars_clean[, identity_type_id := NULL]
-stars_clean
-```
-```{r}
-user_stars = merge.data.table(x = user_id_clean, y = stars_clean, by.x = 'identity', by.y = 'login')
-user_stars = unique(user_stars)
-user_stars
-```
-```{r}
-all.equal(user_stars$id, user_stars$identity_id)
-```
+## Stars
 Let's see how many stars do they put:
 ```{r}
 user_stars_nobot = user_stars[is_bot == F]
@@ -220,6 +604,7 @@ Let's change the visualization:
 t = new_transform(name = 'x', function(x) log(x, base = exp(1)), function(x) exp(x))
 ggplot(user_stars_nobot[N<2000], aes(x = N)) + geom_density() + scale_y_continuous(trans = t)
 ```
+
 Let's try to fit a power law:
 ```{r}
 #| label: Power law fitting
@@ -229,7 +614,5 @@ est = estimate_xmin(m)
 est
 m$setXmin(est)
 bootstrap_p(m, no_of_sims = 10, threads = 4)
-
-
 ```
 
