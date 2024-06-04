@@ -11,14 +11,10 @@ editor: visual
 ```{r}
 library(ggplot2)
 library(igraph)
-#install.packages('tidyverse')
 library(tidyverse)
 library(data.table)
-#install.packages('anytime')
 library(anytime)
-#install.packages('poweRlaw')
 library(poweRlaw)
-#install.packages('scales')
 library(scales)
 ```
 
@@ -70,7 +66,7 @@ identity_types
 Let's filter out useless attributes from users_id
 
 ```{r}
-users_raw = users_raw[, c('identity_type_id', 'is_bot.y', 'creation_identity_type_id'):=NULL]
+users_raw = users_raw[, c('identity_type_id', 'is_bot.y', 'creation_identity_type_id', 'user_id'):=NULL]
 users_raw
 ```
 
@@ -191,6 +187,7 @@ commits_clean = commits_raw[, ':='(local_created_at = NULL,
                                    original_committed_at = NULL)]
 commits_clean = commits_clean[, ':='(created_at = anytime(created_at),
                                      committed_at = anytime(committed_at))]
+commits_clean = commits_clean[, sha := NULL]
 commits_clean
 ```
 
@@ -339,7 +336,9 @@ package_versions_clean
 
 ```{r}
 package_version_downloads_clean = copy(package_version_downloads)
-package_version_downloads_clean
+package_version_downloads_clean = package_version_downloads_clean[, downloaded_at := anytime(downloaded_at)]
+package_version_downloads_clean[downloaded_at != anytime("2022-09-07")]
+
 ```
 
 
@@ -349,14 +348,14 @@ package_version_downloads_clean
 ### Number of followers
 
 ```{r}
-n_followers = followers[, .N, by = followee_id]
+n_followers = followers_clean[, .N, by = followee_id]
 setnames(n_followers, 'N', 'n_followers')
 n_followers
 ```
 ### Number of following
 
 ```{r}
-n_following = followers[, .N, by = follower_login]
+n_following = followers_clean[, .N, by = follower_login]
 setnames(n_following, c('follower_login', 'N'), c('login', 'n_following'))
 n_following = n_following[login != '']
 n_following
@@ -365,7 +364,7 @@ n_following
 ## Users on repositories
 We can try to match users to repositories through commits.
 ```{r}
-users_repos = unique(commits[, .(author_id, repo_id)])
+users_repos = unique(commits_clean[, .(author_id, repo_id)])
 users_repos
 ```
 
@@ -384,11 +383,15 @@ n_stars_put
 ```{r}
 stars_per_repo = stars_clean[, .N, by = repo_id]
 stars_per_repo
+users_repos
 stars_per_user = merge.data.table(
   x = users_repos,
   y = stars_per_repo,
   by.x = 'repo_id',
-  by.y = 'repo_id')
+  by.y = 'repo_id',
+  all.x = T)
+stars_per_user
+stars_per_user[is.na(stars_per_user)] <- 0
 stars_per_user
 n_stars_received = stars_per_user[, sum(N), by = author_id]
 setnames(n_stars_received, c('author_id', 'V1'), c('id', 'n_stars_received'))
@@ -422,17 +425,18 @@ n_issue_reactions_put
 ```
 ### Received
 ```{r}
+#First, we count all the issues that have more than 0 reactions
 reactions_per_issue = merge.data.table(
   x = issues_clean,
   y = issue_reactions_clean, 
   by.x = c('repo_id', 'issue_number'),
   by.y = c('repo_id', 'issue_number')
 )
-reactions_per_issue
-n_issue_reactions_received = reactions_per_issue[, .N, by = author_login.x]
+reaction_per_issue
+n_issue_reactions_received = reaction_per_issue[, .N, by = author_login.x]
+n_issue_reactions_received
 setnames(n_issue_reactions_received, c('author_login.x', 'N'), c('login', 'n_issue_reactions_received'))
 n_issue_reactions_received = n_issue_reactions_received[login != '']
-
 n_issue_reactions_received
 ```
 ## Issue comments
@@ -450,9 +454,8 @@ comments_per_issue = merge.data.table(
   x = issues_clean,
   y = issue_comments_clean, 
   by.x = c('repo_id', 'issue_number'),
-  by.y = c('repo_id', 'issue_number')
+  by.y = c('repo_id', 'issue_number'),
 )
-comments_per_issue
 n_issue_comments_received = comments_per_issue[, .N, by = author_login.x]
 setnames(n_issue_comments_received, c('author_login.x', 'N'), c('login', 'n_issue_comments_received'))
 n_issue_comments_received = n_issue_comments_received[login != '']
@@ -484,7 +487,8 @@ n_issue_comment_reactions_received
 
 ## Commits
 ```{r}
-n_commits = commits_clean[, .N, by = author_id]
+commits
+n_commits = commits_clean[, .N, by = author_login]
 setnames(n_commits, c('author_id', 'N'), c('id', 'n_commits'))
 n_commits
 ```
@@ -503,8 +507,10 @@ comments_per_commit = merge.data.table(
   x = commits_clean,
   y = commit_comments_clean, 
   by.x = c('repo_id', 'id'),
-  by.y = c('repo_id', 'commit_id')
+  by.y = c('repo_id', 'commit_id'),
+  all.x = T
 )
+comments_per_commit 
 comments_per_commit
 n_commit_comments_received = comments_per_commit[, .N, by = author_id.x]
 setnames(n_commit_comments_received, c('author_id.x', 'N'), c('id', 'n_commit_comments_received'))
@@ -534,8 +540,435 @@ setnames(n_commit_comment_reactions_received, c('author_id.x', 'N'), c('id', 'n_
 n_commit_comment_reactions_received = remove_missing(n_commit_comment_reactions_received)
 n_commit_comment_reactions_received
 ```
+## Pull requests
+```{r}
+pull_requests_clean
+n_pull_requests = pull_requests_clean[, .N, by = author_login]
+setnames(n_pull_requests, c('author_login', 'N'), c('login', 'n_pull_requests'))
+n_pull_requests
+```
+## Pull request reactions
+```{r}
+pull_request_reactions_clean
+```
+### Put
+```{r}
+n_pull_request_reactions_put = pull_request_reactions_clean[, .N, by = author_login]
+setnames(n_pull_request_reactions_put, c('author_id', 'N'), c('id', 'n_pull_request_reactions_put'))
+n_pull_request_reactions_put = remove_missing(n_pull_request_reactions_put)
+n_pull_request_reactions_put
+```
+### Received
+```{r}
+reaction_per_pull_request = merge.data.table(
+  x = pull_requests_clean,
+  y = pull_request_reactions_clean, 
+  by.x = c('repo_id', 'pullrequest_number'),
+  by.y = c('repo_id', 'pullrequest_number')
+)
+reaction_per_pull_request
+n_pull_request_reactions_received = reaction_per_pull_request[, .N, by = author_login.x]
+setnames(n_pull_request_reactions_received, c('author_login.x', 'N'), c('login', 'n_pull_request_reactions_received'))
+n_pull_request_reactions_received = remove_missing(n_pull_request_reactions_received)
+n_pull_request_reactions_received
+```
+## Pull request comments
+```{r}
+pull_request_comments_clean
+```
+### Posted
+```{r}
+n_pull_request_comments_posted = pull_request_comments_clean[, .N, by = author_login]
+setnames(n_pull_request_comments_posted, c('author_login', 'N'), c('login', 'n_pull_request_comments_posted'))
+n_pull_request_comments_posted = remove_missing(n_pull_request_comments_posted)
+n_pull_request_comments_posted
+```
+### Received
+```{r}
+comments_per_pull_request = merge.data.table(
+  x = pull_requests_clean,
+  y = pull_request_comments_clean, 
+  by.x = c('repo_id', 'pullrequest_number'),
+  by.y = c('repo_id', 'pullrequest_number')
+)
+comments_per_pull_request
+n_pull_request_comments_received = comments_per_pull_request[, .N, by = author_login.x]
+setnames(n_pull_request_comments_received, c('author_login.x', 'N'), c('login', 'n_pull_request_comments_received'))
+n_pull_request_comments_received = remove_missing(n_pull_request_comments_received)
+n_pull_request_comments_received
+```
+## Pull request comment reactions
+```{r}
+pull_request_comment_reactions_clean
+```
+### Put
+```{r}
+n_pull_request_comment_reactions_put = pull_request_comment_reactions_clean[, .N, by = author_login]
+setnames(n_pull_request_comment_reactions_put, c('author_login', 'N'), c('login', 'n_pull_request_comment_reactions_put'))
+n_pull_request_comment_reactions_put = remove_missing(n_pull_request_comment_reactions_put)
+n_pull_request_comment_reactions_put
+```
+### Received
+```{r}
+comment_reactions_per_pull_request = merge.data.table(
+  x = pull_request_comments_clean,
+  y = pull_request_comment_reactions_clean, 
+  by.x = c('repo_id', 'pullrequest_number', 'comment_id'),
+  by.y = c('repo_id', 'pullrequest_number', 'comment_id')
+)
+comment_reactions_per_pull_request
+n_pull_request_comment_reactions_received = comment_reactions_per_pull_request[, .N, by = author_login.x]
+setnames(n_pull_request_comment_reactions_received, c('author_login.x', 'N'), c('login', 'n_pull_request_comment_reactions_received'))
+n_pull_request_comment_reactions_received = remove_missing(n_pull_request_comment_reactions_received)
+n_pull_request_comment_reactions_received
+```
+## Watchers
+```{r}
+watchers_clean
+```
+### Watching
+```{r}
+n_repo_watched_per_user = watchers_clean[, .N, by = login]
+setnames(n_repo_watched_per_user, c('login', 'N'), c('login', 'n_repo_watched_per_user'))
+n_repo_watched_per_user = remove_missing(n_repo_watched_per_user)
+n_repo_watched_per_user
+```
 
+### Watched
+```{r}
+n_being_watched_from = merge.data.table(
+  x = users_repos,
+  y = watchers_clean, 
+  by.x = c('repo_id'),
+  by.y = c('repo_id'),
+  allow.cartesian = T
+)
+n_being_watched_from
+n_being_watched_from = n_being_watched_from[, .N, by = author_id]
+setnames(n_being_watched_from, c('author_id', 'N'), c('id', 'n_being_watched_from'))
+n_being_watched_from = remove_missing(n_being_watched_from)
+n_being_watched_from
+```
+## Forks
+```{r}
+forks_clean
+```
+## Organization memberships
+```{r}
+org_memberships_clean
+sources
+```
+## Repo downloads
+```{r}
+packages_clean
+package_versions_clean
+package_version_downloads_clean
+```
+
+```{r}
+# versions_per_package = merge.data.table(
+#   x = packages_clean,
+#   y = package_versions_clean,
+#   by.x = c('id'),
+#   by.y = c('package_id'),
+# )
+# versions_per_package
+# downloads_per_package = merge.data.table(
+#   x = package_versions_clean,
+#   y = package_version_downloads_clean,
+#   by.x = 'id',
+#   by.y = 'package_version'
+# )
+# downloads_per_package
+# downloads_per_repo = downloads_per_package[, .N, by = repo_id]
+# n_being_watched_from = n_being_watched_from[, .N, by = author_id]
+# setnames(n_being_watched_from, c('author_id', 'N'), c('id', 'n_being_watched_from'))
+# n_being_watched_from = remove_missing(n_being_watched_from)
+# n_being_watched_from
+```
+## Final score per user
+```{r}
+users_clean
+setnames(users_clean, 'identity', 'login')
+users_clean
+n_followers
+n_following
+```
+
+```{r}
+n_followers
+users_with_scores = merge.data.table(
+  x = users_clean,
+  y = n_followers,
+  by.x = 'id',
+  by.y = 'followee_id',
+  all.x = T
+)
+users_with_scores[is.na(n_followers), n_followers := 0]
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_following,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+users_with_scores[is.na(n_following), n_following := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_stars_put,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+users_with_scores[is.na(n_stars_put), n_stars_put := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_stars_received,
+  by.x = 'id',
+  by.y = 'id',
+  all.x = T
+)
+users_with_scores[is.na(n_stars_received), n_stars_received := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_issues_posted,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+users_with_scores[is.na(n_issues_posted), n_issues_posted := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_issue_reactions_put,
+  by.x = 'id',
+  by.y = 'id',
+  all.x = T
+)
+
+users_with_scores[is.na(n_reactions_put), n_reactions_put := 0]
+
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_issue_reactions_received,
+  by.x = 'login',
+  by.y = 'login', 
+  all.x = T
+)
+
+users_with_scores[is.na(n_issue_reactions_received), n_issue_reactions_received := 0]
+
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_issue_comments_posted,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+users_with_scores[is.na(n_issue_comments_posted), n_issue_comments_posted := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_issue_comments_received,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_issue_comments_received), n_issue_comments_received := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_issue_comment_reactions_put,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+users_with_scores[is.na(n_issue_comment_reactions_put), n_issue_comment_reactions_put := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_issue_comment_reactions_received,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_issue_comment_reactions_received), n_issue_comment_reactions_received := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_commits,
+  by.x = 'id',
+  by.y = 'id',
+  all.x = T
+)
+
+users_with_scores[is.na(n_commits), n_commits := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_commit_comments_posted,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_commit_comments_posted), n_commit_comments_posted := 0]
+
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_commit_comments_received,
+  by.x = 'id',
+  by.y = 'id',
+  all.x = T
+)
+
+users_with_scores[is.na(n_commit_comments_received), n_commit_comments_received := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_commit_comment_reactions_put,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_commit_comment_reactions_put), n_commit_comment_reactions_put := 0]
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_commit_comment_reactions_received,
+  by.x = 'id',
+  by.y = 'id',
+  all.x = T
+)
+
+users_with_scores[is.na(n_commit_comment_reactions_received), n_commit_comment_reactions_received := 0]
+
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_pull_requests,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_pull_requests), n_pull_requests := 0]
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_pull_request_reactions_put,
+  by.x = 'id',
+  by.y = 'id',
+  all.x = T
+)
+
+users_with_scores[is.na(n_pull_request_reactions_put), n_pull_request_reactions_put := 0]
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_pull_request_reactions_received,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_pull_request_reactions_received), n_pull_request_reactions_received := 0]
+```
+
+```{r}
+#| label: dai
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_pull_request_comments_posted,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_pull_request_comments_posted), n_pull_request_comments_posted := 0]
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_pull_request_comments_received,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_pull_request_comments_received), n_pull_request_comments_received := 0]
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_pull_request_comment_reactions_put,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_pull_request_comment_reactions_put), n_pull_request_comment_reactions_put := 0]
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_pull_request_comment_reactions_received,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_pull_request_comment_reactions_received), n_pull_request_comment_reactions_received := 0]
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_repo_watched_per_user,
+  by.x = 'login',
+  by.y = 'login',
+  all.x = T
+)
+
+users_with_scores[is.na(n_repo_watched_per_user), n_repo_watched_per_user := 0]
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_being_watched_from,
+  by.x = 'id',
+  by.y = 'id',
+  all.x = T
+)
+
+users_with_scores[is.na(n_being_watched_from), n_being_watched_from := 0]
+
+users_with_scores
+```
 # Exploring distributions
+## Regression on various scores
+```{r}
+lm = lm(formula = n_followers ~ 
+          n_following
+        + n_stars_put + n_stars_received 
+        + n_issues_posted 
+        + n_reactions_put + n_issue_reactions_received 
+        + n_issue_comments_posted + n_issue_comments_received
+        + n_issue_comment_reactions_put + n_issue_comment_reactions_received  
+        + n_commit_comments_posted + n_commit_comments_received 
+        + n_commit_comment_reactions_put + n_commit_comment_reactions_received 
+        + n_pull_requests 
+        + n_pull_request_reactions_put + n_pull_request_reactions_received 
+        + n_pull_request_comments_posted + n_pull_request_comments_received 
+        + n_pull_request_comment_reactions_put + n_pull_request_comment_reactions_received 
+        + n_being_watched_from + n_repo_watched_per_user,
+        data = users_with_scores)
+summary(lm)
+```
+```{r}
+lm = lm(formula = n_commits ~ n_being_watched_from, data = users_with_scores)
+summary(lm)
+```
+```{r}
+ggplot(users_with_scores, aes(n_followers, n_commits)) + geom_point()+ scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
+```
+
+
+
 
 ## Users
 
