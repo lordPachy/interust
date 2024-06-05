@@ -979,7 +979,7 @@ users_aggregate = users_with_scores[, ':='(social_popularity =
                                             n_pull_request_comments_posted +
                                             n_commits +
                                             n_pull_requests)]
-users_aggregate = users_aggregate[social_popularity > 10 & social_activity > 10 & working_activity > 10]
+users_aggregate = users_aggregate[social_popularity > 10 & social_activity > 10 & working_activity > 10 & is_bot.x == 'f']
 users_aggregate
 ```
 
@@ -1064,7 +1064,33 @@ ggplot(created_or_generated, aes(x = birthdate_unknown)) + geom_bar()
 ggplot(user_id_raw, aes(x = year(created_at))) + geom_bar()
 ```
 
-## Followers
+
+## Stars
+Let's see how many stars do they put:
+```{r}
+user_stars_nobot = user_stars[is_bot == F]
+user_stars_nobot = user_stars[, .N, by = identity]
+user_stars_nobot
+ggplot(user_stars_nobot[N<2000], aes(x = N)) + geom_density() + scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
+```
+Let's change the visualization:
+```{r}
+t = new_transform(name = 'x', function(x) log(x, base = exp(1)), function(x) exp(x))
+ggplot(user_stars_nobot[N<2000], aes(x = N)) + geom_density() + scale_y_continuous(trans = t)
+```
+
+Let's try to fit a power law:
+```{r}
+#| label: Power law fitting
+user_stars_nobot
+m = displ$new(user_stars_nobot$N)
+est = estimate_xmin(m)
+est
+m$setXmin(est)
+bootstrap_p(m, no_of_sims = 10, threads = 4)
+```
+
+### Old data
 
 ```{r}
 follower_degree = followers_aggr[, .N, by = followee_id]
@@ -1119,4 +1145,91 @@ est
 m$setXmin(est)
 bootstrap_p(m, no_of_sims = 10, threads = 4)
 ```
+
+# Network analysis
+## Followers' degree distribution
+
+```{r}
+ggplot(data = users_aggregate) + geom_density(aes(n_followers))+ scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
+```
+```{r}
+follower_degree = followers_aggr[, .N, by = followee_id]
+#follower_degree = follower_degree[N > 486]
+ggplot(follower_degree, aes(x = N)) + geom_bar(width = 1000) + scale_y_continuous(trans = 'log10')
+```
+
+Let's check if it fits a power law distribution:
+
+```{r}
+#| label: Power law fitting
+m_m = displ$new(users_aggregate[n_followers>30 & n_followers < 8000]$n_followers)
+est = estimate_xmin(m_m)
+est
+```
+
+```{r}
+#| label: Power law fitting
+m_m$setXmin(est)
+plot(m_m)
+lines(m_m, col = 2)
+```
+
+Let's see if it fits:
+```{r}
+#| label: Power law fitting
+parallel::detectCores()
+bs = bootstrap_p(m_m, no_of_sims = 10, threads = 2)
+bs
+```
+## Network representation
+```{r}
+users_repos
+users_on_users = merge.data.table(
+  x = users_repos,
+  y = users_repos,
+  by = 'repo_id',
+  allow.cartesian = T
+)
+
+v= c('author_id.x', 'author_id.y')
+users_on_users
+users = users_on_users[author_id.x != author_id.y, ..v]
+users
+```
+
+
+```{r}
+edges = data.frame("from" = users$author_id.x, "to" = users$author_id.y, stringsAsFactors = F )
+g <- graph.data.frame(edges, directed = F)
+g
+
+V(g)[name %in% edges[, 2] & 'r' %in% edges[, 2]]
+V(g)$type <- V(g)$name[0] =='r'
+```
+```{r}
+V(g)$color <- V(g)$type
+V(g)$color=gsub("FALSE","red",V(g)$color)
+V(g)$color=gsub("TRUE","blue",V(g)$color)
+pdf("/home/pachy/Desktop/ACSAI/interust/user_interactions/plots/user_repo_bipartite.pdf")
+V(g)$color <- ifelse(V(g)$type, "lightblue", "salmon")
+V(g)$shape <- ifelse(V(g)$type, "circle", "square")
+E(g)$color <- "lightgray"
+plot(g, vertex.label.cex = 0.2, 
+     vertex.label.color = "black",
+     vertex.label = "NA",
+     edge.width=0.5,
+     edges.size = 0.1,
+     vertex.size = 0.1,
+     edge.lty = 2,
+     edge.curved = TRUE,
+     layout=layout_as_bipartite)
+```
+```{r}
+as_adjacency_matrix(g)
+plot(degree_distribution(g))
+df = data.frame(x = 1:108777, y = degree_distribution(g))
+df
+ggplot(data = df, aes(x, y)) + geom_point() + scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
+```
+
 
