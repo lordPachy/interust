@@ -16,6 +16,9 @@ library(data.table)
 library(anytime)
 library(poweRlaw)
 library(scales)
+library(DBI)
+#install.packages("RSQLite")
+library(RSQLite)
 ```
 
 ## Importing data
@@ -29,7 +32,14 @@ for (f in files){
   table = read.csv(paste(data_dir, f, sep = ''))
   assign(str_sub(f, 1, -5), setDT(table))
 }
+identities = setDT(read.csv('/home/pachy/Desktop/ACSAI/interust/data/full/dumps/postgresql/data/identities.csv'))
+users = setDT(read.csv('/home/pachy/Desktop/ACSAI/interust/data/full/dumps/postgresql/data/users.csv'))
 repositories
+```
+## Importing DB through SQLite
+```{r}
+mydb = dbConnect(RSQLite::SQLite(), "/home/pachy/Desktop/ACSAI/interust/data/full/dumps/sqlite/rust_repos_2022_09_07_export.db")
+dbGetQuery(mydb, 'SELECT * FROM followers')
 ```
 
 # Cleaning data
@@ -66,7 +76,7 @@ identity_types
 Let's filter out useless attributes from users_id
 
 ```{r}
-users_raw = users_raw[, c('identity_type_id', 'is_bot.y', 'creation_identity_type_id', 'user_id'):=NULL]
+users_raw = users_raw[, c('identity_type_id', 'is_bot.y', 'creation_identity_type_id'):=NULL]
 users_raw
 ```
 
@@ -105,7 +115,7 @@ followers_raw
 ```{r}
 followers_clean = followers_raw[, follower_identity_type_id := NULL]
 followers_clean = followers_raw[, created_at := NULL]
-followers_clean
+followers_clean[!is.na(follower_id)]
 ```
 
 
@@ -122,7 +132,8 @@ A bit of cleaning:
 ```{r}
 stars_clean = stars_row[, starred_at := anytime(starred_at)]
 stars_clean[, identity_type_id := NULL]
-stars_clean
+stars_clean[is.na(identity_id)]
+]
 ```
 
 ```{r}
@@ -140,7 +151,7 @@ issues_raw
 issues_clean = issues_raw[, created_at := anytime(created_at)]
 issues_clean = issues_clean[, closed_at := anytime(closed_at)]
 issues_clean = issues_clean[, identity_type_id := NULL]
-issues_clean
+issues_clean[!is.na(author_id)]
 ```
 ## Issue reactions
 ```{r}
@@ -150,7 +161,7 @@ issue_reactions_raw
 ```{r}
 issue_reactions_clean = issue_reactions_raw[, created_at := anytime(created_at)]
 issue_reactions_clean = issue_reactions_clean[, identity_type_id := NULL]
-issue_reactions_clean
+issue_reactions_clean[is.na(author_id)]
 ```
 ## Issue comments
 ```{r}
@@ -349,15 +360,16 @@ package_version_downloads_clean[downloaded_at != anytime("2022-09-07")]
 
 ```{r}
 n_followers = followers_clean[, .N, by = followee_id]
-setnames(n_followers, 'N', 'n_followers')
+setnames(n_followers, c('N', 'followee_id'), c('n_followers', 'id'))
+n_followers = n_followers[!is.na(id)]
 n_followers
 ```
 ### Number of following
 
 ```{r}
-n_following = followers_clean[, .N, by = follower_login]
-setnames(n_following, c('follower_login', 'N'), c('login', 'n_following'))
-n_following = n_following[login != '']
+n_following = followers_clean[, .N, by = follower_id]
+setnames(n_following, c('follower_id', 'N'), c('id', 'n_following'))
+n_following = n_following[!is.na(id)]
 n_following
 ```
 
@@ -365,6 +377,7 @@ n_following
 We can try to match users to repositories through commits.
 ```{r}
 users_repos = unique(commits_clean[, .(author_id, repo_id)])
+users_repos = users_repos[!is.na(author_id)]
 users_repos
 ```
 
@@ -372,10 +385,10 @@ users_repos
 ## Stars
 ### Put
 ```{r}
-
-n_stars_put = stars_clean[, .N, by = login]
-setnames(n_stars_put, 'N', 'n_stars_put')
-n_stars_put = n_stars_put[login != '']
+stars_clean
+n_stars_put = stars_clean[, .N, by = identity_id]
+setnames(n_stars_put, c('N', 'identity_id'), c('n_stars_put', 'id'))
+n_stars_put = n_stars_put[!is.na(id)]
 n_stars_put
 ```
 
@@ -388,13 +401,11 @@ stars_per_user = merge.data.table(
   x = users_repos,
   y = stars_per_repo,
   by.x = 'repo_id',
-  by.y = 'repo_id',
-  all.x = T)
-stars_per_user
-stars_per_user[is.na(stars_per_user)] <- 0
-stars_per_user
+  by.y = 'repo_id'
+)
 n_stars_received = stars_per_user[, sum(N), by = author_id]
 setnames(n_stars_received, c('author_id', 'V1'), c('id', 'n_stars_received'))
+n_stars_received = n_stars_received[!is.na(id)]
 n_stars_received
 ```
 
@@ -403,10 +414,10 @@ n_stars_received
 ### Posted by users
 
 ```{r}
-
-n_issues_posted = issues_clean[, .N, by = author_login]
-setnames(n_issues_posted, c('author_login', 'N'), c('login', 'n_issues_posted'))
-n_issues_posted = n_issues_posted[login != '']
+issues_clean
+n_issues_posted = issues_clean[, .N, by = author_id]
+setnames(n_issues_posted, c('author_id', 'N'), c('id', 'n_issues_posted'))
+n_issues_posted = n_issues_posted[!is.na(id)]
 n_issues_posted
 ```
 ### Per repository
@@ -419,8 +430,8 @@ n_issues_per_repo
 ### Put
 ```{r}
 n_issue_reactions_put= issue_reactions_clean[, .N, by = author_id]
-setnames(n_issue_reactions_put, c('author_id', 'N'), c('id', 'n_reactions_put'))
-n_issue_reactions_put = remove_missing(n_issue_reactions_put)
+setnames(n_issue_reactions_put, c('author_id', 'N'), c('id', 'n_issue_reactions_put'))
+n_issue_reactions_put = n_issue_reactions_put[!is.na(id)]
 n_issue_reactions_put
 ```
 ### Received
@@ -433,19 +444,18 @@ reactions_per_issue = merge.data.table(
   by.y = c('repo_id', 'issue_number')
 )
 reaction_per_issue
-n_issue_reactions_received = reaction_per_issue[, .N, by = author_login.x]
+n_issue_reactions_received = reaction_per_issue[, .N, by = author_id.x]
 n_issue_reactions_received
-setnames(n_issue_reactions_received, c('author_login.x', 'N'), c('login', 'n_issue_reactions_received'))
-n_issue_reactions_received = n_issue_reactions_received[login != '']
+setnames(n_issue_reactions_received, c('author_id.x', 'N'), c('id', 'n_issue_reactions_received'))
+n_issue_reactions_received = n_issue_reactions_received[!is.na(id)]
 n_issue_reactions_received
 ```
 ## Issue comments
 ### Posted
 ```{r}
-n_issue_comments_posted= issue_comments_clean[, .N, by = author_login]
-setnames(n_issue_comments_posted, c('author_login', 'N'), c('login', 'n_issue_comments_posted'))
-n_issue_comments_posted = remove_missing(n_issue_comments_posted)
-n_issue_comments_posted = n_issue_comments_posted[login != '']
+n_issue_comments_posted= issue_comments_clean[, .N, by = author_id]
+setnames(n_issue_comments_posted, c('author_id', 'N'), c('id', 'n_issue_comments_posted'))
+n_issue_comments_posted = n_issue_comments_posted[!is.na(id)]
 n_issue_comments_posted
 ```
 ### Received
@@ -456,18 +466,17 @@ comments_per_issue = merge.data.table(
   by.x = c('repo_id', 'issue_number'),
   by.y = c('repo_id', 'issue_number'),
 )
-n_issue_comments_received = comments_per_issue[, .N, by = author_login.x]
-setnames(n_issue_comments_received, c('author_login.x', 'N'), c('login', 'n_issue_comments_received'))
-n_issue_comments_received = n_issue_comments_received[login != '']
+n_issue_comments_received = comments_per_issue[, .N, by = author_id.x]
+setnames(n_issue_comments_received, c('author_id.x', 'N'), c('id', 'n_issue_comments_received'))
+n_issue_comments_received = n_issue_comments_received[!is.na(id)]
 n_issue_comments_received
 ```
 ## Issue comment reactions
 ### Put
 ```{r}
-n_issue_comment_reactions_put= issue_comment_reactions_clean[, .N, by = author_login]
-setnames(n_issue_comment_reactions_put, c('author_login', 'N'), c('login', 'n_issue_comment_reactions_put'))
-n_issue_comment_reactions_put = remove_missing(n_issue_comment_reactions_put)
-n_issue_comment_reactions_put = n_issue_comment_reactions_put[login != '']
+n_issue_comment_reactions_put= issue_comment_reactions_clean[, .N, by = author_id]
+setnames(n_issue_comment_reactions_put, c('author_id', 'N'), c('id', 'n_issue_comment_reactions_put'))
+n_issue_comment_reactions_put = n_issue_comment_reactions_put[!is.na(id)]
 n_issue_comment_reactions_put
 ```
 ### Received
@@ -479,26 +488,26 @@ reactions_per_issue_comment = merge.data.table(
   by.y = c('repo_id', 'issue_number', 'comment_id')
 )
 reactions_per_issue_comment
-n_issue_comment_reactions_received = reactions_per_issue_comment[, .N, by = author_login.x]
-setnames(n_issue_comment_reactions_received, c('author_login.x', 'N'), c('login', 'n_issue_comment_reactions_received'))
-n_issue_comment_reactions_received = n_issue_comment_reactions_received[login != '']
+n_issue_comment_reactions_received = reactions_per_issue_comment[, .N, by = author_id.x]
+n_issue_comment_reactions_received
+setnames(n_issue_comment_reactions_received, c('author_id.x', 'N'), c('id', 'n_issue_comment_reactions_received'))
+n_issue_comment_reactions_received = n_issue_comment_reactions_received[!is.na(id)]
 n_issue_comment_reactions_received
 ```
 
 ## Commits
 ```{r}
-commits
-n_commits = commits_clean[, .N, by = author_login]
+n_commits = commits_clean[, .N, by = author_id]
 setnames(n_commits, c('author_id', 'N'), c('id', 'n_commits'))
+n_commits = n_commits[!is.na(id)]
 n_commits
 ```
 ## Commit comments
 ### Posted
 ```{r}
-n_commit_comments_posted= commit_comments_clean[, .N, by = author_login]
-setnames(n_commit_comments_posted, c('author_login', 'N'), c('login', 'n_commit_comments_posted'))
-n_commit_comments_posted = remove_missing(n_commit_comments_posted)
-n_commit_comments_posted = n_commit_comments_posted[login != ""]
+n_commit_comments_posted= commit_comments_clean[, .N, by = author_id]
+setnames(n_commit_comments_posted, c('author_id', 'N'), c('id', 'n_commit_comments_posted'))
+n_commit_comments_posted = n_commit_comments_posted[!is.na(id)]
 n_commit_comments_posted
 ```
 ### Received
@@ -514,16 +523,15 @@ comments_per_commit
 comments_per_commit
 n_commit_comments_received = comments_per_commit[, .N, by = author_id.x]
 setnames(n_commit_comments_received, c('author_id.x', 'N'), c('id', 'n_commit_comments_received'))
-n_commit_comments_received = remove_missing(n_commit_comments_received)
+n_commit_comments_received = n_commit_comments_received[!is.na(id)]
 n_commit_comments_received
 ```
 ## Commit comment reactions
 ### Put
 ```{r}
-n_commit_comment_reactions_put= commit_comment_reactions_clean[, .N, by = author_login]
-setnames(n_commit_comment_reactions_put, c('author_login', 'N'), c('login', 'n_commit_comment_reactions_put'))
-n_commit_comment_reactions_put = remove_missing(n_commit_comment_reactions_put)
-n_commit_comment_reactions_put = n_commit_comment_reactions_put[login != ""]
+n_commit_comment_reactions_put= commit_comment_reactions_clean[, .N, by = author_id]
+setnames(n_commit_comment_reactions_put, c('author_id', 'N'), c('id', 'n_commit_comment_reactions_put'))
+n_commit_comment_reactions_put = n_commit_comment_reactions_put[!is.na(id)]
 n_commit_comment_reactions_put
 ```
 ### Received
@@ -537,14 +545,15 @@ reaction_per_commit_comment = merge.data.table(
 reaction_per_commit_comment
 n_commit_comment_reactions_received = reaction_per_commit_comment[, .N, by = author_id.x]
 setnames(n_commit_comment_reactions_received, c('author_id.x', 'N'), c('id', 'n_commit_comment_reactions_received'))
-n_commit_comment_reactions_received = remove_missing(n_commit_comment_reactions_received)
+n_commit_comment_reactions_received = n_commit_comment_reactions_received[!is.na(id)]
 n_commit_comment_reactions_received
 ```
 ## Pull requests
 ```{r}
 pull_requests_clean
-n_pull_requests = pull_requests_clean[, .N, by = author_login]
-setnames(n_pull_requests, c('author_login', 'N'), c('login', 'n_pull_requests'))
+n_pull_requests = pull_requests_clean[, .N, by = author_id]
+setnames(n_pull_requests, c('author_id', 'N'), c('id', 'n_pull_requests'))
+n_pull_requests = n_pull_requests[!is.na(id)]
 n_pull_requests
 ```
 ## Pull request reactions
@@ -553,9 +562,9 @@ pull_request_reactions_clean
 ```
 ### Put
 ```{r}
-n_pull_request_reactions_put = pull_request_reactions_clean[, .N, by = author_login]
+n_pull_request_reactions_put = pull_request_reactions_clean[, .N, by = author_id]
 setnames(n_pull_request_reactions_put, c('author_id', 'N'), c('id', 'n_pull_request_reactions_put'))
-n_pull_request_reactions_put = remove_missing(n_pull_request_reactions_put)
+n_pull_request_reactions_put = n_pull_request_reactions_put[!is.na(id)]
 n_pull_request_reactions_put
 ```
 ### Received
@@ -567,9 +576,9 @@ reaction_per_pull_request = merge.data.table(
   by.y = c('repo_id', 'pullrequest_number')
 )
 reaction_per_pull_request
-n_pull_request_reactions_received = reaction_per_pull_request[, .N, by = author_login.x]
-setnames(n_pull_request_reactions_received, c('author_login.x', 'N'), c('login', 'n_pull_request_reactions_received'))
-n_pull_request_reactions_received = remove_missing(n_pull_request_reactions_received)
+n_pull_request_reactions_received = reaction_per_pull_request[, .N, by = author_id.x]
+setnames(n_pull_request_reactions_received, c('author_id.x', 'N'), c('id', 'n_pull_request_reactions_received'))
+n_pull_request_reactions_received = n_pull_request_reactions_received[!is.na(id)]
 n_pull_request_reactions_received
 ```
 ## Pull request comments
@@ -578,9 +587,9 @@ pull_request_comments_clean
 ```
 ### Posted
 ```{r}
-n_pull_request_comments_posted = pull_request_comments_clean[, .N, by = author_login]
-setnames(n_pull_request_comments_posted, c('author_login', 'N'), c('login', 'n_pull_request_comments_posted'))
-n_pull_request_comments_posted = remove_missing(n_pull_request_comments_posted)
+n_pull_request_comments_posted = pull_request_comments_clean[, .N, by = author_id]
+setnames(n_pull_request_comments_posted, c('author_id', 'N'), c('id', 'n_pull_request_comments_posted'))
+n_pull_request_comments_posted = n_pull_request_comments_posted[!is.na(id)]
 n_pull_request_comments_posted
 ```
 ### Received
@@ -592,9 +601,9 @@ comments_per_pull_request = merge.data.table(
   by.y = c('repo_id', 'pullrequest_number')
 )
 comments_per_pull_request
-n_pull_request_comments_received = comments_per_pull_request[, .N, by = author_login.x]
-setnames(n_pull_request_comments_received, c('author_login.x', 'N'), c('login', 'n_pull_request_comments_received'))
-n_pull_request_comments_received = remove_missing(n_pull_request_comments_received)
+n_pull_request_comments_received = comments_per_pull_request[, .N, by = author_id.x]
+setnames(n_pull_request_comments_received, c('author_id.x', 'N'), c('id', 'n_pull_request_comments_received'))
+n_pull_request_comments_received = n_pull_request_comments_received[!is.na(id)]
 n_pull_request_comments_received
 ```
 ## Pull request comment reactions
@@ -603,9 +612,9 @@ pull_request_comment_reactions_clean
 ```
 ### Put
 ```{r}
-n_pull_request_comment_reactions_put = pull_request_comment_reactions_clean[, .N, by = author_login]
-setnames(n_pull_request_comment_reactions_put, c('author_login', 'N'), c('login', 'n_pull_request_comment_reactions_put'))
-n_pull_request_comment_reactions_put = remove_missing(n_pull_request_comment_reactions_put)
+n_pull_request_comment_reactions_put = pull_request_comment_reactions_clean[, .N, by = author_id]
+setnames(n_pull_request_comment_reactions_put, c('author_id', 'N'), c('id', 'n_pull_request_comment_reactions_put'))
+n_pull_request_comment_reactions_put = n_pull_request_comment_reactions_put[!is.na(id)]
 n_pull_request_comment_reactions_put
 ```
 ### Received
@@ -617,9 +626,9 @@ comment_reactions_per_pull_request = merge.data.table(
   by.y = c('repo_id', 'pullrequest_number', 'comment_id')
 )
 comment_reactions_per_pull_request
-n_pull_request_comment_reactions_received = comment_reactions_per_pull_request[, .N, by = author_login.x]
-setnames(n_pull_request_comment_reactions_received, c('author_login.x', 'N'), c('login', 'n_pull_request_comment_reactions_received'))
-n_pull_request_comment_reactions_received = remove_missing(n_pull_request_comment_reactions_received)
+n_pull_request_comment_reactions_received = comment_reactions_per_pull_request[, .N, by = author_id.x]
+setnames(n_pull_request_comment_reactions_received, c('author_id.x', 'N'), c('id', 'n_pull_request_comment_reactions_received'))
+n_pull_request_comment_reactions_received = n_pull_request_comment_reactions_received[!is.na(id)]
 n_pull_request_comment_reactions_received
 ```
 ## Watchers
@@ -628,9 +637,9 @@ watchers_clean
 ```
 ### Watching
 ```{r}
-n_repo_watched_per_user = watchers_clean[, .N, by = login]
-setnames(n_repo_watched_per_user, c('login', 'N'), c('login', 'n_repo_watched_per_user'))
-n_repo_watched_per_user = remove_missing(n_repo_watched_per_user)
+n_repo_watched_per_user = watchers_clean[, .N, by = identity_id]
+setnames(n_repo_watched_per_user, c('identity_id', 'N'), c('id', 'n_repo_watched_per_user'))
+n_repo_watched_per_user = n_repo_watched_per_user[!is.na(id)]
 n_repo_watched_per_user
 ```
 
@@ -646,7 +655,7 @@ n_being_watched_from = merge.data.table(
 n_being_watched_from
 n_being_watched_from = n_being_watched_from[, .N, by = author_id]
 setnames(n_being_watched_from, c('author_id', 'N'), c('id', 'n_being_watched_from'))
-n_being_watched_from = remove_missing(n_being_watched_from)
+n_being_watched_from = n_being_watched_from[!is.na(id)]
 n_being_watched_from
 ```
 ## Forks
@@ -701,15 +710,15 @@ users_with_scores = merge.data.table(
   x = users_clean,
   y = n_followers,
   by.x = 'id',
-  by.y = 'followee_id',
+  by.y = 'id',
   all.x = T
 )
 users_with_scores[is.na(n_followers), n_followers := 0]
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_following,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 users_with_scores[is.na(n_following), n_following := 0]
@@ -717,8 +726,8 @@ users_with_scores[is.na(n_following), n_following := 0]
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_stars_put,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 users_with_scores[is.na(n_stars_put), n_stars_put := 0]
@@ -735,8 +744,8 @@ users_with_scores[is.na(n_stars_received), n_stars_received := 0]
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_issues_posted,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 users_with_scores[is.na(n_issues_posted), n_issues_posted := 0]
@@ -749,14 +758,14 @@ users_with_scores = merge.data.table(
   all.x = T
 )
 
-users_with_scores[is.na(n_reactions_put), n_reactions_put := 0]
+users_with_scores[is.na(n_issue_reactions_put), n_issue_reactions_put := 0]
 
 
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_issue_reactions_received,
-  by.x = 'login',
-  by.y = 'login', 
+  by.x = 'id',
+  by.y = 'id', 
   all.x = T
 )
 
@@ -766,8 +775,8 @@ users_with_scores[is.na(n_issue_reactions_received), n_issue_reactions_received 
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_issue_comments_posted,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 users_with_scores[is.na(n_issue_comments_posted), n_issue_comments_posted := 0]
@@ -775,8 +784,8 @@ users_with_scores[is.na(n_issue_comments_posted), n_issue_comments_posted := 0]
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_issue_comments_received,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -785,8 +794,8 @@ users_with_scores[is.na(n_issue_comments_received), n_issue_comments_received :=
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_issue_comment_reactions_put,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 users_with_scores[is.na(n_issue_comment_reactions_put), n_issue_comment_reactions_put := 0]
@@ -794,8 +803,8 @@ users_with_scores[is.na(n_issue_comment_reactions_put), n_issue_comment_reaction
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_issue_comment_reactions_received,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -814,8 +823,8 @@ users_with_scores[is.na(n_commits), n_commits := 0]
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_commit_comments_posted,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -835,8 +844,8 @@ users_with_scores[is.na(n_commit_comments_received), n_commit_comments_received 
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_commit_comment_reactions_put,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -854,8 +863,8 @@ users_with_scores[is.na(n_commit_comment_reactions_received), n_commit_comment_r
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_pull_requests,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -872,8 +881,8 @@ users_with_scores[is.na(n_pull_request_reactions_put), n_pull_request_reactions_
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_pull_request_reactions_received,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -885,8 +894,8 @@ users_with_scores[is.na(n_pull_request_reactions_received), n_pull_request_react
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_pull_request_comments_posted,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -894,8 +903,8 @@ users_with_scores[is.na(n_pull_request_comments_posted), n_pull_request_comments
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_pull_request_comments_received,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -903,8 +912,8 @@ users_with_scores[is.na(n_pull_request_comments_received), n_pull_request_commen
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_pull_request_comment_reactions_put,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -912,8 +921,8 @@ users_with_scores[is.na(n_pull_request_comment_reactions_put), n_pull_request_co
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_pull_request_comment_reactions_received,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -921,8 +930,8 @@ users_with_scores[is.na(n_pull_request_comment_reactions_received), n_pull_reque
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_repo_watched_per_user,
-  by.x = 'login',
-  by.y = 'login',
+  by.x = 'id',
+  by.y = 'id',
   all.x = T
 )
 
@@ -937,34 +946,96 @@ users_with_scores = merge.data.table(
 
 users_with_scores[is.na(n_being_watched_from), n_being_watched_from := 0]
 
-users_with_scores
 ```
+```{r}
+#| label: creating aggregate scores
+
+users_aggregate = users_with_scores[, ':='(social_popularity =
+                                          n_followers +
+                                          n_stars_received +
+#                                          n_issue_reactions_received,
+#                                          n_issue_comment_reactions_received,
+#                                          n_commit_comment_reactions_received,
+#                                          n_pull_request_reactions_received,
+#                                          n_pull_request_comment_reactions_received,
+                                          n_being_watched_from,
+                                      social_activity =
+                                          n_following +
+                                          n_stars_put +
+#                                          n_issue_reactions_put,
+#                                          n_issue_comment_reactions_put,
+#                                          n_commit_comment_reactions_put,
+#                                          n_pull_request_reactions_put,
+#                                          n_pull_request_comment_reactions_put,
+                                          n_repo_watched_per_user,
+#                                      working_popularity = 
+#                                        sum(n_issue_comments_received,
+#                                            n_commit_comments_received,
+#                                            n_pull_request_comments_received),
+                                      working_activity = 
+                                            n_issues_posted +
+                                            n_issue_comments_posted +
+                                            n_commit_comments_posted +
+                                            n_pull_request_comments_posted +
+                                            n_commits +
+                                            n_pull_requests)]
+users_aggregate = users_aggregate[social_popularity > 10 & social_activity > 10 & working_activity > 10]
+users_aggregate
+```
+
+## Let's try to open the preprocessed CSV
+```{r}
+read.csv()
+```
+
 # Exploring distributions
+##Basic info
+```{r}
+users_with_scores[is.na(user_id)]
+summary(users_with_scores)
+```
+
 ## Regression on various scores
 ```{r}
-lm = lm(formula = n_followers ~ 
-          n_following
-        + n_stars_put + n_stars_received 
-        + n_issues_posted 
-        + n_reactions_put + n_issue_reactions_received 
-        + n_issue_comments_posted + n_issue_comments_received
-        + n_issue_comment_reactions_put + n_issue_comment_reactions_received  
-        + n_commit_comments_posted + n_commit_comments_received 
-        + n_commit_comment_reactions_put + n_commit_comment_reactions_received 
-        + n_pull_requests 
-        + n_pull_request_reactions_put + n_pull_request_reactions_received 
-        + n_pull_request_comments_posted + n_pull_request_comments_received 
-        + n_pull_request_comment_reactions_put + n_pull_request_comment_reactions_received 
-        + n_being_watched_from + n_repo_watched_per_user,
+lm = lm(formula = n_stars_received ~ 
+#          n_following
+#        + n_stars_put 
+#        + n_stars_received 
+#        + n_issues_posted 
+#        + n_issue_reactions_put 
+#        + n_issue_reactions_received 
+#        + n_issue_comments_posted 
+#        + n_issue_comments_received
+#        + n_issue_comment_reactions_put 
+#        + n_issue_comment_reactions_received  
+#        + n_commit_comments_posted 
+#        + n_commit_comments_received, 
+#        + n_commit_comment_reactions_put 
+#        + n_commit_comment_reactions_received 
+          n_commits, 
+#        + n_pull_request_reactions_put 
+#        + n_pull_request_reactions_received 
+#        + n_pull_request_comments_posted 
+#        + n_pull_request_comments_received 
+#        + n_pull_request_comment_reactions_put 
+#        + n_pull_request_comment_reactions_received 
+#        + n_being_watched_from, 
+#        + n_repo_watched_per_user,
         data = users_with_scores)
 summary(lm)
 ```
 ```{r}
-lm = lm(formula = n_commits ~ n_being_watched_from, data = users_with_scores)
+lm = lm(formula = n_commit_comments_posted ~ n_commit_comment_reactions_received, data = users_with_scores)
 summary(lm)
 ```
+# Most working active users are the ones that are more followed
 ```{r}
-ggplot(users_with_scores, aes(n_followers, n_commits)) + geom_point()+ scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
+x = 10:10000
+df = data.frame(x)
+```
+
+```{r}
+ggplot(users_aggregate) + geom_point(aes(working_activity, social_popularity)) + scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
 ```
 
 
