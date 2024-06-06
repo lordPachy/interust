@@ -19,6 +19,15 @@ library(scales)
 library(DBI)
 #install.packages("RSQLite")
 library(RSQLite)
+#install.packages('goft')
+library('goft')
+#install.packages('useful')
+library('useful')
+install.packages('ClusterR')
+library(ClusterR)
+install.packages('FPDclustering')
+library(FPDclustering)
+remotes::install_github('mlampros/ClusterR', upgrade = 'always', dependencies = TRUE, repos = 'https://cloud.r-project.org/')
 ```
 
 ## Importing data
@@ -979,7 +988,39 @@ users_aggregate = users_with_scores[, ':='(social_popularity =
                                             n_pull_request_comments_posted +
                                             n_commits +
                                             n_pull_requests)]
-users_aggregate = users_aggregate[social_popularity > 10 & social_activity > 10 & working_activity > 10 & is_bot.x == 'f']
+
+users_aggregate_log = users_with_scores[, ':='(social_popularity =
+                                          log(n_followers 
+                                              + n_stars_received 
+                                              +n_being_watched_from),
+#                                          n_issue_reactions_received,
+#                                          n_issue_comment_reactions_received,
+#                                          n_commit_comment_reactions_received,
+#                                          n_pull_request_reactions_received,
+#                                          n_pull_request_comment_reactions_received,
+                                          
+                                      social_activity =log(
+                                          n_following +
+                                          n_stars_put +
+#                                          n_issue_reactions_put,
+#                                          n_issue_comment_reactions_put,
+#                                          n_commit_comment_reactions_put,
+#                                          n_pull_request_reactions_put,
+#                                          n_pull_request_comment_reactions_put,
+                                          n_repo_watched_per_user),
+#                                      working_popularity = 
+#                                        sum(n_issue_comments_received,
+#                                            n_commit_comments_received,
+#                                            n_pull_request_comments_received),
+                                      working_activity = 
+                                            log(n_issues_posted +
+                                            n_issue_comments_posted +
+                                            n_commit_comments_posted +
+                                            n_pull_request_comments_posted +
+                                            n_commits +
+                                            n_pull_requests))]
+users_aggregate = users_aggregate[social_popularity > 0 & social_activity > 0 & working_activity > 5 & is_bot.x == 'f']
+users_aggregate_log = users_aggregate_log[social_popularity > 0 & social_activity > 0 & working_activity > 0 & is_bot.x == 'f']
 users_aggregate
 ```
 
@@ -991,8 +1032,7 @@ read.csv()
 # Exploring distributions
 ##Basic info
 ```{r}
-users_with_scores[is.na(user_id)]
-summary(users_with_scores)
+summary(users_aggregate)
 ```
 
 ## Regression on various scores
@@ -1035,10 +1075,70 @@ df = data.frame(x)
 ```
 
 ```{r}
-ggplot(users_aggregate) + geom_point(aes(working_activity, social_popularity)) + scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
+ggplot(users_aggregate) + geom_point(aes(working_activity, social_popularity))+ scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
 ```
 
 
+## Clustering analysis
+```{r}
+#| label: Useful columns
+set.seed(42)
+useful_columns = c(
+#          'n_following',
+#         'n_stars_put',
+#         'n_stars_received',
+#         'n_issues_posted',
+#          'n_issue_reactions_put',
+         # 'n_issue_reactions_received',
+#         'n_issue_comments_posted',
+         #'n_issue_comments_received',
+#          'n_issue_comment_reactions_put',
+         # 'n_issue_comment_reactions_received',
+#         'n_commit_comments_posted',
+         #'n_commit_comments_received',
+#          'n_commit_comment_reactions_put',
+         # 'n_commit_comment_reactions_received',
+#         'n_commits',
+         # 'n_pull_request_reactions_put',
+#          'n_pull_request_reactions_received',
+#         'n_pull_request_comments_posted',
+         #'n_pull_request_comments_received',
+#         'n_pull_request_comment_reactions_put',
+         #'n_pull_request_comment_reactions_received',
+#         'n_being_watched_from',
+#         'n_repo_watched_per_user'
+            'social_activity',
+            'working_activity',
+            'social_popularity')
+users_useful_features = users_aggregate_log[, ..useful_columns]
+users_useful_features
+```
+
+```{r}
+#| label: K-Means clustering
+
+n = 20
+km = kmeans(users_useful_features, n, iter.max = 100L)
+km$centers[3*n]
+df = data.frame(social_activity = km$centers[1:n], working_activity = km$centers[(n+1):(2*n)], social_popularity = km$centers[(2*n+1):(3*n)])
+df
+ggplot(df, aes(social_activity, social_popularity)) + geom_point()
+```
+
+```{r}
+#| label: Hierarchical clustering
+
+hclust_users = hclust(d=dist(users_useful_features[sample(.N, 50000)])) 
+tree = cutree(hclust_users, k = 5)
+plot(tree)
+```
+```{r}
+#| label: Probability clustering
+
+res = GPDC(data = users_useful_features[sample(.N, 5000)], k = 3)
+table(res$n_commits)
+plot(res)
+```
 
 
 ## Users
@@ -1146,6 +1246,110 @@ m$setXmin(est)
 bootstrap_p(m, no_of_sims = 10, threads = 4)
 ```
 
+## Log normal followers' distribution
+```{r}
+m_m = dislnorm$new(users_aggregate[n_followers>55]$n_followers)
+est_xmin = estimate_xmin(m_m, distance = 'reweight')
+est_xmin
+m_m$setXmin(est_xmin)
+est_pars = estimate_pars(m_m)
+m_m$setPars(est_pars)
+```
+
+```{r}
+plot(m_m)
+lines(m_m, col = 2)
+```
+```{r}
+#| label: Simulation
+bootstrap_p(m_m, no_of_sims = 30, threads = 4, distance = 'reweight')
+```
+```{r}
+#| label: A different test for log normality
+data = sample(users_aggregate[n_followers>55]$n_followers, 5000, replace = F)
+data
+goft::weibull_test(data)
+```
+```{r}
+users_aggregate[n_followers>55]$n_followers
+followers_logscale = log(users_aggregate[n_followers>0]$n_followers, base = 20)
+followers_loglogscale = log(users_aggregate[n_followers>0]$n_followers, base = 5)
+followers_loglogscale
+followers_df = data.frame(x = followers_loglogscale)
+ggplot(followers_df, aes(x)) + geom_density()
+```
+```{r}
+followers_loglogscale = log(log(users_aggregate[n_followers>10]$n_followers))
+shapiro.test(sample(followers_loglogscale, 5000, replace = T))
+```
+```{r}
+#| label: how it should go
+
+normal_data <- rnorm(200)
+
+#perform kolmogorov-smirnov test
+ks.test(normal_data, 'pnorm')
+```
+
+
+```{r}
+#| label: Plotting theoretical vs real followers distribution
+
+distr = dist_pdf(m_m, q = NULL, log = FALSE)
+points = dist_rand(m_m, n = 13213)
+points
+length(users_aggregate[n_followers>55]$n_followers)
+df = data.frame(theoretical = points, real = users_aggregate[n_followers>55]$n_followers)
+ggplot(data = df) + geom_density(mapping = aes(x = theoretical, colour = 'red')) +
+  scale_color_manual(labels = c("Real distribution", "Theoretical distribution"), values = c("blue", "red")) + geom_density(mapping = aes(x = real, colour = 'blue')) + scale_x_continuous(trans = 'log10') + xlab('N of followers')
+```
+
+
+## Exponential followers' distribution
+```{r}
+m_m = disexp$new(users_aggregate[n_followers>0]$n_followers)
+est_xmin = estimate_xmin(m_m)
+est_xmin
+m_m$setXmin(est_xmin)
+#est_pars = estimate_pars(m_m)
+#m_m$setPars(est_pars)
+```
+
+```{r}
+plot(m_m)
+lines(m_m, col = 2)
+```
+```{r}
+#| label: Simulation
+bootstrap_p(m_m, no_of_sims = 10, threads = 4)
+```
+
+
+## Power law followers' distribution
+```{r}
+m_m = displ$new(users_aggregate[n_followers>0]$n_followers)
+est_xmin = estimate_xmin(m_m)
+m_m$setXmin(est_xmin)
+est_pars = estimate_pars(m_m)
+m_m$setPars(est_pars)
+```
+
+```{r}
+plot(m_m)
+lines(m_m, col = 2)
+```
+```{r}
+#| label: Simulation
+bootstrap_p(m_m, no_of_sims = 10, threads = 4)
+```
+
+## Social popularity
+
+```{r}
+ggplot(data = users_aggregate, aes(social_popularity)) + geom_density() + scale_x_log10()
+```
+
+
 # Network analysis
 ## Followers' degree distribution
 
@@ -1195,6 +1399,10 @@ v= c('author_id.x', 'author_id.y')
 users_on_users
 users = users_on_users[author_id.x != author_id.y, ..v]
 users
+users_degree_repos = users[, .N, by = author_id.x]
+users_degree_repos
+df = data.frame(x = users_degree_repos[, N])
+ggplot(df, aes(x)) + geom_density() + scale_x_continuous(trans = 'log10')
 ```
 
 
