@@ -23,11 +23,11 @@ library(RSQLite)
 library('goft')
 #install.packages('useful')
 library('useful')
-install.packages('ClusterR')
+#install.packages('ClusterR')
 library(ClusterR)
-install.packages('FPDclustering')
+#install.packages('FPDclustering')
 library(FPDclustering)
-remotes::install_github('mlampros/ClusterR', upgrade = 'always', dependencies = TRUE, repos = 'https://cloud.r-project.org/')
+#remotes::install_github('mlampros/ClusterR', upgrade = 'always', dependencies = TRUE, repos = 'https://cloud.r-project.org/')
 ```
 
 ## Importing data
@@ -368,6 +368,7 @@ package_version_downloads_clean[downloaded_at != anytime("2022-09-07")]
 ### Number of followers
 
 ```{r}
+followers_clean
 n_followers = followers_clean[, .N, by = followee_id]
 setnames(n_followers, c('N', 'followee_id'), c('n_followers', 'id'))
 n_followers = n_followers[!is.na(id)]
@@ -1122,8 +1123,63 @@ km = kmeans(users_useful_features, n, iter.max = 100L)
 km$centers[3*n]
 df = data.frame(social_activity = km$centers[1:n], working_activity = km$centers[(n+1):(2*n)], social_popularity = km$centers[(2*n+1):(3*n)])
 df
-ggplot(df, aes(social_activity, social_popularity)) + geom_point()
+ggplot(df, aes(working_activity, social_popularity)) + geom_point()
 ```
+
+```{r}
+#| label: Analysis of popular, non-working people
+
+users_aggregate_log[km$cluster == 1 | km$cluster == 2 | km$cluster == 6]$n_being_watched_from
+summary(users_aggregate_log[km$cluster == 1 | km$cluster == 2 | km$cluster == 6])
+ggplot(users_aggregate, aes(n_being_watched_from)) + geom_density() + scale_x_log10()
+```
+```{r}
+#| label: Test
+
+x=c(1,2,3,4,5) 
+y=c(1,2,3) 
+  
+# Finding maximum length 
+max_ln <- max(c(length(x), length(y))) 
+gfg_data<- data.frame(col1 = c(x,rep(NA, max_ln - length(x))), 
+                      col2 = c(y,rep(NA, max_ln - length(y)))) 
+gfg_data 
+is.data.frame((gfg_data)) 
+```
+
+
+
+```{r}
+#choose the parameters that need to be analyzed
+col_of_interest = 'n_followers'
+
+#observe them
+users_aggregate_log[, ..col_of_interest]
+
+#count how many observations are needed to complete the table
+n_observations = count(users_aggregate_log)
+n_observations
+n_partial_observations = count(users_aggregate_log[km$cluster == 1 | km$cluster == 2 | km$cluster == 6, ..col_of_interest])
+as.numeric(n_partial_observations)
+n_observations - n_partial_observations
+
+#compose the data frames
+comparison_lucky = data.frame(x = sample(
+  as.vector(users_aggregate_log[, ..col_of_interest]), 
+  as.numeric(n_partial_observations)
+  ),
+                              y = as.vector(users_aggregate_log[km$cluster == 1 | km$cluster == 2 | km$cluster == 6, ..col_of_interest]))
+comparison_lucky$y
+#plot
+comparison_lucky
+ggplot(comparison_lucky) +scale_color_manual(labels = c("General distribution", "Lucky people distribution"), values = c("red", "blue"))+
+  geom_density(aes(x), colour = 'red') + 
+  geom_density(aes(y), colour = 'blue')+ 
+   
+  scale_x_log10()+ 
+  xlab(col_of_interest)
+```
+
 
 ```{r}
 #| label: Hierarchical clustering
