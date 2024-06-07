@@ -17,6 +17,7 @@ library(anytime)
 library(poweRlaw)
 library(scales)
 library(DBI)
+
 #install.packages("RSQLite")
 library(RSQLite)
 #install.packages('goft')
@@ -27,6 +28,9 @@ library('useful')
 library(ClusterR)
 #install.packages('FPDclustering')
 library(FPDclustering)
+#install.packages('jaccard')
+#install.packages('bayesbio')
+library('bayesbio')
 #remotes::install_github('mlampros/ClusterR', upgrade = 'always', dependencies = TRUE, repos = 'https://cloud.r-project.org/')
 ```
 
@@ -51,7 +55,22 @@ mydb = dbConnect(RSQLite::SQLite(), "/home/pachy/Desktop/ACSAI/interust/data/ful
 dbGetQuery(mydb, 'SELECT * FROM followers')
 ```
 
+## Importing pre-processed scripts
+```{r}
+contributions = setDT(read.csv("/home/pachy/Desktop/ACSAI/interust/data/full/examples/preprocessed/contributions.csv"))
+dependencies = setDT(read.csv("/home/pachy/Desktop/ACSAI/interust/data/full/examples/preprocessed/dependencies.csv"))
+usage = setDT(read.csv("/home/pachy/Desktop/ACSAI/interust/data/full/examples/preprocessed/usage.csv"))
+```
+
+
 # Cleaning data
+## Contributions
+
+```{r}
+contributions
+length(unique(contributions[, c(repo_id)]))
+```
+
 
 ## Users and identities
 
@@ -388,7 +407,15 @@ We can try to match users to repositories through commits.
 ```{r}
 users_repos = unique(commits_clean[, .(author_id, repo_id)])
 users_repos = users_repos[!is.na(author_id)]
-users_repos
+
+#Alternative version with preprocessed files
+cols_useful = c('repo_id', 'user_id')
+users_repos_pre = unique(contributions[, ..cols_useful])
+setnames(users_repos_pre, 'user_id', 'author_id')
+users_repos = users_repos[!is.na(author_id)]
+
+
+users_repos_pre
 ```
 
 
@@ -399,6 +426,9 @@ stars_clean
 n_stars_put = stars_clean[, .N, by = identity_id]
 setnames(n_stars_put, c('N', 'identity_id'), c('n_stars_put', 'id'))
 n_stars_put = n_stars_put[!is.na(id)]
+
+
+#Alternative version with preprocessed files
 n_stars_put
 ```
 
@@ -510,7 +540,14 @@ n_issue_comment_reactions_received
 n_commits = commits_clean[, .N, by = author_id]
 setnames(n_commits, c('author_id', 'N'), c('id', 'n_commits'))
 n_commits = n_commits[!is.na(id)]
-n_commits
+
+#Alternative version with preprocessed files
+contributions
+n_commits_pre = contributions[, sum(nb_commits), by = user_id]
+setnames(n_commits_pre, c('user_id', 'V1'), c('id', 'n_commits'))
+n_commits_pre = n_commits_pre[!is.na(id)]
+
+n_commits_pre
 ```
 ## Commit comments
 ### Posted
@@ -679,9 +716,21 @@ sources
 ```
 ## Repo downloads
 ```{r}
-packages_clean
-package_versions_clean
-package_version_downloads_clean
+usage
+
+repo_downloads = usage[, sum(downloads), by = repo_id]
+setnames(repo_downloads, 'V1', 'n_downloads')
+repo_downloads = repo_downloads[!is.na(repo_id)]
+users_repos_pre
+users_downloads = merge.data.table(
+  x = users_repos_pre,
+  y = repo_downloads,
+  by = 'repo_id'
+)
+n_downloads = users_downloads[, sum(n_downloads), by = author_id]
+setnames(n_downloads, c('author_id', 'V1'), c('id', 'n_downloads'))
+n_downloads = n_downloads[!is.na(id)]
+repo_downloads
 ```
 
 ```{r}
@@ -820,6 +869,7 @@ users_with_scores = merge.data.table(
 
 users_with_scores[is.na(n_issue_comment_reactions_received), n_issue_comment_reactions_received := 0]
 
+users_with_scores
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_commits,
@@ -956,7 +1006,18 @@ users_with_scores = merge.data.table(
 
 users_with_scores[is.na(n_being_watched_from), n_being_watched_from := 0]
 
+users_with_scores = merge.data.table(
+  x = users_with_scores,
+  y = n_downloads,
+  by.x = 'id',
+  by.y = 'id',
+  all.x = T
+)
+
+users_with_scores[is.na(n_downloads), n_downloads := 0]
+users_with_scores[n_downloads == 0]
 ```
+
 ```{r}
 #| label: creating aggregate scores
 
@@ -1022,7 +1083,7 @@ users_aggregate_log = users_with_scores[, ':='(social_popularity =
                                             n_pull_requests))]
 users_aggregate = users_aggregate[social_popularity > 0 & social_activity > 0 & working_activity > 5 & is_bot.x == 'f']
 users_aggregate_log = users_aggregate_log[social_popularity > 0 & social_activity > 0 & working_activity > 0 & is_bot.x == 'f']
-users_aggregate
+users_aggregate[n_downloads != 0]
 ```
 
 ## Let's try to open the preprocessed CSV
@@ -1035,6 +1096,12 @@ read.csv()
 ```{r}
 summary(users_aggregate)
 ```
+
+## Downloads per user: what is happening
+```{r}
+ggplot(users_with_scores) + geom_density(aes(n_downloads, ..scaled..)) + scale_x_log10()
+```
+
 
 ## Regression on various scores
 ```{r}
@@ -1083,7 +1150,6 @@ ggplot(users_aggregate) + geom_point(aes(working_activity, social_popularity))+ 
 ## Clustering analysis
 ```{r}
 #| label: Useful columns
-set.seed(42)
 useful_columns = c(
 #          'n_following',
 #         'n_stars_put',
@@ -1117,68 +1183,108 @@ users_useful_features
 
 ```{r}
 #| label: K-Means clustering
-
+set.seed(42)
 n = 20
 km = kmeans(users_useful_features, n, iter.max = 100L)
 km$centers[3*n]
 df = data.frame(social_activity = km$centers[1:n], working_activity = km$centers[(n+1):(2*n)], social_popularity = km$centers[(2*n+1):(3*n)])
-df
-ggplot(df, aes(working_activity, social_popularity)) + geom_point()
+df = df |> mutate(id = row_number())
+km
+#ggplot(df, aes(working_activity, social_popularity)) + geom_point()
 ```
 
 ```{r}
 #| label: Analysis of popular, non-working people
 
-users_aggregate_log[km$cluster == 1 | km$cluster == 2 | km$cluster == 6]$n_being_watched_from
-summary(users_aggregate_log[km$cluster == 1 | km$cluster == 2 | km$cluster == 6])
+users_aggregate_log[km$cluster == 1 | km$cluster == 9 | km$cluster == 14]$n_being_watched_from
+summary(users_aggregate_log[km$cluster == 1 | km$cluster == 9 | km$cluster == 14])
 ggplot(users_aggregate, aes(n_being_watched_from)) + geom_density() + scale_x_log10()
 ```
-```{r}
-#| label: Test
-
-x=c(1,2,3,4,5) 
-y=c(1,2,3) 
-  
-# Finding maximum length 
-max_ln <- max(c(length(x), length(y))) 
-gfg_data<- data.frame(col1 = c(x,rep(NA, max_ln - length(x))), 
-                      col2 = c(y,rep(NA, max_ln - length(y)))) 
-gfg_data 
-is.data.frame((gfg_data)) 
-```
-
-
 
 ```{r}
+#| label: Lucky vs population graph comparisons: n_being_watched_from
+
 #choose the parameters that need to be analyzed
-col_of_interest = 'n_followers'
+col_of_interest = 'n_being_watched_from'
 
 #observe them
 users_aggregate_log[, ..col_of_interest]
 
+#create the vectors of interest
+x = users_aggregate_log[[col_of_interest]]
+#x
+y = users_aggregate_log[km$cluster == 1 | km$cluster == 9 | km$cluster == 14]
+y = y[[col_of_interest]]
+#y
+
 #count how many observations are needed to complete the table
-n_observations = count(users_aggregate_log)
-n_observations
-n_partial_observations = count(users_aggregate_log[km$cluster == 1 | km$cluster == 2 | km$cluster == 6, ..col_of_interest])
-as.numeric(n_partial_observations)
-n_observations - n_partial_observations
+n_observations = length(x)
+#n_observations
+n_partial_observations = length(y)
+#n_observations - n_partial_observations
 
 #compose the data frames
-comparison_lucky = data.frame(x = sample(
-  as.vector(users_aggregate_log[, ..col_of_interest]), 
-  as.numeric(n_partial_observations)
-  ),
-                              y = as.vector(users_aggregate_log[km$cluster == 1 | km$cluster == 2 | km$cluster == 6, ..col_of_interest]))
-comparison_lucky$y
+comparison_lucky = data.frame(x = x, 
+                              y = c(y, rep(NA, n_observations - n_partial_observations)))
+
 #plot
-comparison_lucky
-ggplot(comparison_lucky) +scale_color_manual(labels = c("General distribution", "Lucky people distribution"), values = c("red", "blue"))+
-  geom_density(aes(x), colour = 'red') + 
-  geom_density(aes(y), colour = 'blue')+ 
-   
-  scale_x_log10()+ 
-  xlab(col_of_interest)
+#comparison_lucky
+ggplot(comparison_lucky) +
+  scale_color_manual(
+    labels = c("General distribution", "Lucky people distribution"),
+    values = c("red", "blue")
+    )+
+  geom_density(aes(x, colour = 'red', ..scaled..)) + 
+  geom_density(aes(y, colour = 'blue', ..scaled..)) + 
+  scale_x_log10() + 
+  xlab(col_of_interest) + 
+  ylab('frequency')
 ```
+```{r}
+#| label: Hard-working vs population graph comparisons: 
+
+#choose the parameters that need to be analyzed
+col_of_interest = 'n_being_watched_from'
+
+#observe them
+users_aggregate_log[, ..col_of_interest]
+
+#create the vectors of interest
+x = users_aggregate_log[[col_of_interest]]
+#x
+y = users_aggregate_log[km$cluster == 16]
+y = y[[col_of_interest]]
+#y
+
+#count how many observations are needed to complete the table
+n_observations = length(x)
+#n_observations
+n_partial_observations = length(y)
+#n_observations - n_partial_observations
+
+#compose the data frames
+comparison_hard_working = data.frame(x = x, 
+                              y = c(y, rep(NA, n_observations - n_partial_observations)))
+
+#plot
+#comparison_hard_working
+ggplot(comparison_hard_working) +
+  scale_color_manual(
+    labels = c("General distribution", "Hard-working people distribution"),
+    values = c("red", "blue")
+    )+
+  geom_density(aes(x, colour = 'red', ..scaled..)) + 
+  geom_density(aes(y, colour = 'blue', ..scaled..)) + 
+  scale_x_log10() + 
+  xlab(col_of_interest) + 
+  ylab('frequency')
+```
+```{r}
+#| label: Jaccard similarity on these groups
+
+jaccardSets(comparison_hard_working$x, comparison_hard_working$y)
+```
+
 
 
 ```{r}
@@ -1304,6 +1410,7 @@ bootstrap_p(m, no_of_sims = 10, threads = 4)
 
 ## Log normal followers' distribution
 ```{r}
+#| label: Getting the values
 m_m = dislnorm$new(users_aggregate[n_followers>55]$n_followers)
 est_xmin = estimate_xmin(m_m, distance = 'reweight')
 est_xmin
@@ -1313,12 +1420,33 @@ m_m$setPars(est_pars)
 ```
 
 ```{r}
+#| label: Basic plots
 plot(m_m)
 lines(m_m, col = 2)
 ```
+
 ```{r}
 #| label: Simulation
 bootstrap_p(m_m, no_of_sims = 30, threads = 4, distance = 'reweight')
+```
+
+```{r}
+#| label: Plotting theoretical vs real followers distribution
+
+distr = dist_pdf(m_m, q = NULL, log = FALSE)
+points = dist_rand(m_m, n = 20833)
+points
+length(users_aggregate[n_followers>55]$n_followers)
+df = data.frame(theoretical = points, real = users_aggregate[n_followers>55]$n_followers)
+ggplot(data = df) +
+  geom_density(mapping = aes(x = theoretical, colour = 'red')) +
+  scale_color_manual(
+    labels = c("Real distribution", "Theoretical distribution"),
+    values = c("blue", "red")
+    ) + 
+  geom_density(mapping = aes(x = real, colour = 'blue')) +
+  scale_x_continuous(trans = 'log10') +
+  xlab('N of followers')
 ```
 ```{r}
 #| label: A different test for log normality
@@ -1326,6 +1454,7 @@ data = sample(users_aggregate[n_followers>55]$n_followers, 5000, replace = F)
 data
 goft::weibull_test(data)
 ```
+
 ```{r}
 users_aggregate[n_followers>55]$n_followers
 followers_logscale = log(users_aggregate[n_followers>0]$n_followers, base = 20)
@@ -1334,10 +1463,12 @@ followers_loglogscale
 followers_df = data.frame(x = followers_loglogscale)
 ggplot(followers_df, aes(x)) + geom_density()
 ```
+
 ```{r}
 followers_loglogscale = log(log(users_aggregate[n_followers>10]$n_followers))
 shapiro.test(sample(followers_loglogscale, 5000, replace = T))
 ```
+
 ```{r}
 #| label: how it should go
 
@@ -1346,20 +1477,6 @@ normal_data <- rnorm(200)
 #perform kolmogorov-smirnov test
 ks.test(normal_data, 'pnorm')
 ```
-
-
-```{r}
-#| label: Plotting theoretical vs real followers distribution
-
-distr = dist_pdf(m_m, q = NULL, log = FALSE)
-points = dist_rand(m_m, n = 13213)
-points
-length(users_aggregate[n_followers>55]$n_followers)
-df = data.frame(theoretical = points, real = users_aggregate[n_followers>55]$n_followers)
-ggplot(data = df) + geom_density(mapping = aes(x = theoretical, colour = 'red')) +
-  scale_color_manual(labels = c("Real distribution", "Theoretical distribution"), values = c("blue", "red")) + geom_density(mapping = aes(x = real, colour = 'blue')) + scale_x_continuous(trans = 'log10') + xlab('N of followers')
-```
-
 
 ## Exponential followers' distribution
 ```{r}
@@ -1407,41 +1524,8 @@ ggplot(data = users_aggregate, aes(social_popularity)) + geom_density() + scale_
 
 
 # Network analysis
-## Followers' degree distribution
 
-```{r}
-ggplot(data = users_aggregate) + geom_density(aes(n_followers))+ scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
-```
-```{r}
-follower_degree = followers_aggr[, .N, by = followee_id]
-#follower_degree = follower_degree[N > 486]
-ggplot(follower_degree, aes(x = N)) + geom_bar(width = 1000) + scale_y_continuous(trans = 'log10')
-```
-
-Let's check if it fits a power law distribution:
-
-```{r}
-#| label: Power law fitting
-m_m = displ$new(users_aggregate[n_followers>30 & n_followers < 8000]$n_followers)
-est = estimate_xmin(m_m)
-est
-```
-
-```{r}
-#| label: Power law fitting
-m_m$setXmin(est)
-plot(m_m)
-lines(m_m, col = 2)
-```
-
-Let's see if it fits:
-```{r}
-#| label: Power law fitting
-parallel::detectCores()
-bs = bootstrap_p(m_m, no_of_sims = 10, threads = 2)
-bs
-```
-## Network representation
+## Network representation: users connected by commits in the same repostitories
 ```{r}
 users_repos
 users_on_users = merge.data.table(
@@ -1465,35 +1549,113 @@ ggplot(df, aes(x)) + geom_density() + scale_x_continuous(trans = 'log10')
 ```{r}
 edges = data.frame("from" = users$author_id.x, "to" = users$author_id.y, stringsAsFactors = F )
 g <- graph.data.frame(edges, directed = F)
-g
-
-V(g)[name %in% edges[, 2] & 'r' %in% edges[, 2]]
-V(g)$type <- V(g)$name[0] =='r'
-```
-```{r}
-V(g)$color <- V(g)$type
-V(g)$color=gsub("FALSE","red",V(g)$color)
-V(g)$color=gsub("TRUE","blue",V(g)$color)
-pdf("/home/pachy/Desktop/ACSAI/interust/user_interactions/plots/user_repo_bipartite.pdf")
-V(g)$color <- ifelse(V(g)$type, "lightblue", "salmon")
-V(g)$shape <- ifelse(V(g)$type, "circle", "square")
-E(g)$color <- "lightgray"
-plot(g, vertex.label.cex = 0.2, 
-     vertex.label.color = "black",
-     vertex.label = "NA",
-     edge.width=0.5,
-     edges.size = 0.1,
-     vertex.size = 0.1,
-     edge.lty = 2,
-     edge.curved = TRUE,
-     layout=layout_as_bipartite)
-```
-```{r}
-as_adjacency_matrix(g)
-plot(degree_distribution(g))
-df = data.frame(x = 1:108777, y = degree_distribution(g))
-df
-ggplot(data = df, aes(x, y)) + geom_point() + scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
+g_simplified = igraph::simplify(
+  g, 
+  remove.multiple = T,
+  remove.loops = F,
+  edge.attr.comb = list(weight="sum", type="ignore")
+  )
+V(g)
+g_simplified
 ```
 
+```{r}
+#| label: Adding commits to the graph
+
+commits <- append("id", users_with_scores$n_commits)
+
+names(commits) = commits
+commits
+
+# Loop through the attribute dataframe to add an attribute at the time, using the set_vertex_attribute function. 
+
+for (i in 2:length(commits)){
+
+  # Select attributes
+  temp_attribute <- commits[,c(1,i)]
+
+  # Match the attribute id with the id of the graph vertexes
+  sorted_attr<- temp_attribute[match(temp_attribute[,1], V(g)$commits),2]
+  
+  # Set attributes
+  g <- set_vertex_attr(g, name = (names(commits)[i]), 
+                  index = V(g), value = sorted_attr)
+
+}
+```
+
+
+```{r}
+adjacency_matrix = get.adjacency(g)
+adjacency_matrix
+E(g_simplified)$weight
+transitivity(g)
+```
+```{r}
+average.path.length(g)
+mean_distance(g)
+ggplot(data = data.frame(x = degree_distribution(g)), aes(x)) + geom_density() + scale_x_log10() + scale_y_log10()
+```
+
+
+Let's try a quick test of the power law on this distribution
+
+```{r}
+m_m = conpl$new(degree_distribution(g)[which(degree_distribution(g) > 0)])
+est_xmin = estimate_xmin(m_m)
+est_xmin
+m_m$setXmin(est_xmin)
+est_pars = estimate_pars(m_m)
+m_m$setPars(est_pars)
+```
+
+```{r}
+plot(m_m)
+lines(m_m, col = 2)
+```
+
+```{r}
+#| label: Simulation
+bootstrap_p(m_m, no_of_sims = 20, threads = 4)
+```
+```{r}
+#| label: Density
+
+edge_density(g, loops = F)
+```
+
+```{r}
+#| label: Clustering coefficient
+
+transitivity(g, type = 'global')
+```
+```{r}
+#| label: Diameter
+
+diameter(g, directed=F)
+```
+
+```{r}
+#| label: Centralization
+
+centr_degree(g)$centralization
+```
+
+## Community detection
+
+```{r}
+#| label: Cliques
+cliques(g)
+```
+
+```{r}
+#| label: Cluster edge betwenness
+
+ceb <- cluster_edge_betweenness(g) 
+dendPlot(ceb, mode="hclust")
+```
+
+```{r}
+modularity(ceb)
+```
 
