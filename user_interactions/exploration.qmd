@@ -31,6 +31,8 @@ library(FPDclustering)
 #install.packages('jaccard')
 #install.packages('bayesbio')
 library('bayesbio')
+#install.packages('gbm')
+library('gbm')
 #remotes::install_github('mlampros/ClusterR', upgrade = 'always', dependencies = TRUE, repos = 'https://cloud.r-project.org/')
 ```
 
@@ -1819,3 +1821,193 @@ plot(g_sample, vertex.color=colrs[V(g_sample)$cluster], vertex.label = '')
 ```{r}
 transitivity(g)
 ```
+
+
+# Relationship between commits and stars
+
+```{r}
+usage_sample = setDT(read.csv('/home/pachy/Desktop/ACSAI/interust/data/sample/examples/preprocessed/usage.csv'))
+contributions = setDT(read.csv('/home/pachy/Desktop/ACSAI/interust/data/sample/examples/preprocessed/contributions.csv'))
+
+usage_sample = usage_sample[, timestamp := anytime(timestamp)]
+diff(usage_sample$stars, lag=1)
+contributions = contributions[, timestamp := anytime(timestamp)]
+```
+Let's see how do the number of stars and commits relate to each other
+
+```{r}
+usage_sample
+ggplot(usage_sample, aes(commits, stars)) + geom_point()
+```
+Let's try to add a stars delta instead of a star cumulative count:
+```{r}
+diff(usage_sample$stars, lag=1)
+usage_sample$stars_diff = c(NA, diff(usage_sample$stars, lag=1))
+usage_sample[, ':='(repo_name = NULL,
+                    commits_cumul = NULL,
+                    active_developers = NULL)]
+usage_sample[1]$stars_diff = 0
+
+for (i in 1:(nrow(usage_sample) - 1)){
+  if (usage_sample[i]$repo_id != usage_sample[i+1]$repo_id){
+    usage_sample[i+1]$stars_diff = 0
+  }
+}
+```
+
+We can now create the same cumulative count with months, instead of stars:
+
+```{r}
+usage_sample
+as.numeric(month(usage_sample[3]$timestamp) - month(usage_sample[1]$timestamp))
+
+usage_sample$timestamp_diff = 1:nrow(usage_sample)
+months_passed = 1
+usage_sample[1]$timestamp_diff = 0
+
+for (i in 2:nrow(usage_sample)){
+  if (usage_sample[i-1]$repo_id != usage_sample[i]$repo_id){
+    months_passed = 1
+    usage_sample[i]$timestamp_diff = 0
+  } else {
+    usage_sample[i]$timestamp_diff = months_passed 
+    months_passed = months_passed + 1
+  }
+}
+
+usage_sample
+```
+
+Let's do a preliminary analysis. We can aggregate on the time_stamp and do an analysis on commits vs stars_diff
+
+```{r}
+usage_sample_by_timepassed = usage_sample[, .(stars = mean(stars_diff), commits = mean(commits)), by = timestamp_diff]
+
+usage_sample_by_timepassed = usage_sample_by_timepassed[, ratio := stars/commits]
+usage_sample_by_timepassed
+ggplot(usage_sample_by_timepassed, aes(timestamp_diff, ratio)) + geom_point()
+```
+We can even try do it time-step by time-step
+
+```{r}
+ggplot(usage_sample[timestamp_diff == 10], aes(stars_diff, commits)) + geom_point() + scale_x_log10() + scale_y_log10()
+```
+
+
+```{r}
+contributions = contributions[order(user_id, repo_id, timestamp)]
+contributions
+```
+
+Let's try to do the same with commits here
+
+```{r}
+contributions = contributions[, repo_name := NULL]
+contributions
+contributions$commit_diff = 1:nrow(contributions)
+
+col_contributions = c('repo_id', 'user_id')
+contributions[1]$commit_diff = contributions[1]$nb_commits
+!identical(contributions[4, ..col_contributions], contributions[5, ..col_contributions])
+
+for (i in 2:nrow(contributions)){
+  if (!identical(contributions[i-1, ..col_contributions], contributions[i, ..col_contributions])) {
+    contributions[i]$commit_diff = contributions[i]$nb_commits
+  } else {
+    contributions[i]$commit_diff = contributions[i]$nb_commits - contributions[i - 1]$nb_commits 
+  }
+}
+
+contributions = contributions[commit_diff>=0]
+contributions[commit_diff>=0]
+```
+
+We can now create the same cumulative count with months:
+```{r}
+#| label: Elapsed month function
+elapsed_months <- function(end_date, start_date) {
+    ed <- as.POSIXlt(end_date)
+    sd <- as.POSIXlt(start_date)
+    12 * (ed$year - sd$year) + (ed$mon - sd$mon)
+}
+elapsed_months(contributions[13]$timestamp, contributions[12]$timestamp)
+```
+
+```{r}
+contributions$timestamp_diff = 1:nrow(contributions)
+contributions[1]$timestamp_diff = 0
+begin = contributions[1]$timestamp
+
+for (i in 2:nrow(contributions)){
+  if (!identical(contributions[i-1, ..col_contributions], contributions[i, ..col_contributions])){
+    contributions[i]$timestamp_diff = 0
+    begin = contributions[i]$timestamp
+  } else {
+    contributions[i]$timestamp_diff = elapsed_months(contributions[i]$timestamp, begin)
+  }
+}
+
+contributions = contributions[, commits := NULL]
+contributions
+```
+
+Let's do a preliminary graph, seeing how many commits one does in timeseries with belonging to a repository:
+```{r}
+contributions_sample_by_timepassed = contributions[, .(commits = mean(commit_diff)), by = timestamp_diff]
+
+contributions_sample_by_timepassed
+ggplot(contributions_sample_by_timepassed, aes(timestamp_diff, commits)) + geom_point()
+```
+
+Let's see, instead, how does the star ratio vary with time:
+
+```{r}
+contributions
+usage_sample
+
+contributions_with_stars = merge.data.table(
+  x = contributions,
+  y = usage_sample,
+  by = c('repo_id', 'timestamp')
+)
+
+contributions_with_stars = contributions_with_stars[, timestamp_diff.y := NULL]
+setnames(contributions_with_stars, 'timestamp_diff.x', 'timestamp_diff')
+contributions_with_stars
+```
+
+```{r}
+contributions_ratio_by_timepassed = contributions_with_stars[, .(commits = mean(commit_diff), stars = mean(stars_diff), downloads = mean(downloads)), by = timestamp_diff]
+
+contributions_ratio_by_timepassed = contributions_ratio_by_timepassed[, ':='(ratio_stars = stars/commits, ratio_downloads = downloads/commits)]
+contributions_ratio_by_timepassed
+ggplot(contributions_ratio_by_timepassed, aes(x = timestamp_diff)) + geom_point(aes(y = ratio_stars, colour = 'red')) + geom_point(aes(y = ratio_downloads, colour = 'blue')) + scale_y_log10()  + scale_color_manual(
+    labels = c("Download ratio", "Stars ratio"),
+    values = c("blue", "red")
+    )
+```
+
+And now, let's try to do it time-step by time-step
+
+```{r}
+ggplot(contributions_with_stars[timestamp_diff == 7], aes(commits, stars_diff)) + geom_point() + scale_x_log10() + scale_y_log10()
+```
+
+# Model for predicting followers
+
+```{r}
+users_aggregate
+
+model_trained = gbm(formula = n_followers ~ 
+          n_following,
+        data = users_aggregate)
+
+
+summary(model_trained)
+```
+
+
+
+
+
+
