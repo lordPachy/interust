@@ -37,17 +37,15 @@ library('bayesbio')
 ## Importing data
 
 ```{r}
-data_dir = '/home/pachy/Desktop/ACSAI/interust/data/full/dumps/postgresql/data/'
-files = list.files('/home/pachy/Desktop/ACSAI/interust/data/full/dumps/postgresql/data/')
-#s = 'ciao.csv'
-#str_sub(s, 1, -5)
+data_dir = '/home/pachy/Desktop/ACSAI/interust/data/public_id/dumps/postgresql/data/'
+files = list.files('/home/pachy/Desktop/ACSAI/interust/data/public_id/dumps/postgresql/data/')
+
 for (f in files){
   table = read.csv(paste(data_dir, f, sep = ''))
   assign(str_sub(f, 1, -5), setDT(table))
 }
-identities = setDT(read.csv('/home/pachy/Desktop/ACSAI/interust/data/full/dumps/postgresql/data/identities.csv'))
-users = setDT(read.csv('/home/pachy/Desktop/ACSAI/interust/data/full/dumps/postgresql/data/users.csv'))
-repositories
+length(unique(followers[$follower_login))
+length(unique(identities$identity))
 ```
 ## Importing DB through SQLite
 ```{r}
@@ -143,7 +141,8 @@ followers_raw
 ```{r}
 followers_clean = followers_raw[, follower_identity_type_id := NULL]
 followers_clean = followers_raw[, created_at := NULL]
-followers_clean[!is.na(follower_id)]
+followers_clean = followers_clean[!is.na(follower_id)]
+frequency(follower_login)
 ```
 
 
@@ -160,12 +159,12 @@ A bit of cleaning:
 ```{r}
 stars_clean = stars_row[, starred_at := anytime(starred_at)]
 stars_clean[, identity_type_id := NULL]
-stars_clean[is.na(identity_id)]
-]
+stars_clean = stars_clean[!is.na(identity_id)]
 ```
 
 ```{r}
 all.equal(stars_clean$id, stars_clean$identity_id)
+stars_clean
 ```
 
 ## Issues
@@ -179,7 +178,7 @@ issues_raw
 issues_clean = issues_raw[, created_at := anytime(created_at)]
 issues_clean = issues_clean[, closed_at := anytime(closed_at)]
 issues_clean = issues_clean[, identity_type_id := NULL]
-issues_clean[!is.na(author_id)]
+issues_clean = issues_clean[!is.na(author_id)]
 ```
 ## Issue reactions
 ```{r}
@@ -189,7 +188,7 @@ issue_reactions_raw
 ```{r}
 issue_reactions_clean = issue_reactions_raw[, created_at := anytime(created_at)]
 issue_reactions_clean = issue_reactions_clean[, identity_type_id := NULL]
-issue_reactions_clean[is.na(author_id)]
+issue_reactions_clean = issue_reactions_clean[!is.na(author_id)]
 ```
 ## Issue comments
 ```{r}
@@ -200,6 +199,7 @@ issue_comments_raw
 issue_comments_clean = issue_comments_raw[, created_at := anytime(created_at)]
 issue_comments_clean = issue_comments_clean[, identity_type_id := NULL]
 issue_comments_clean
+issue_comments_clean = issue_comments_clean[!is.na(author_id)]
 ```
 ## Issue comment reactions
 ```{r}
@@ -209,7 +209,7 @@ issue_comment_reactions_raw
 ```{r}
 issue_comment_reactions_clean = issue_comment_reactions_raw[, created_at := anytime(created_at)]
 issue_comment_reactions_clean = issue_comment_reactions_clean[, identity_type_id := NULL]
-issue_comment_reactions_clean
+issue_comment_reactions_clean = issue_comment_reactions_clean[, !is.na(author_id)]
 ```
 ## Commits
 
@@ -374,10 +374,24 @@ package_versions_clean
 ## Package version downloads
 
 ```{r}
-package_version_downloads_clean = copy(package_version_downloads)
-package_version_downloads_clean = package_version_downloads_clean[, downloaded_at := anytime(downloaded_at)]
-package_version_downloads_clean[downloaded_at != anytime("2022-09-07")]
+# package_version_downloads_clean = copy(package_version_downloads)
+# package_version_downloads_clean = package_version_downloads_clean[, downloaded_at := anytime(downloaded_at)]
+# package_version_downloads_clean[downloaded_at != anytime("2022-09-07")]
 
+```
+
+```{r}
+#| label: Testing identity intersections
+
+login_sc = stars_clean[, 'login']
+login_sc = login_sc[!duplicated(login_sc)]
+login_sc
+login_id = users_clean[, 'login']
+login_id
+login_id = login_id[!duplicated(login_id)]
+login_id
+all(as.vector(login_id) %in% (login_sc))
+intersect(login_id, login_sc)
 ```
 
 
@@ -398,7 +412,7 @@ n_followers
 ```{r}
 n_following = followers_clean[, .N, by = follower_id]
 setnames(n_following, c('follower_id', 'N'), c('id', 'n_following'))
-n_following = n_following[!is.na(id)]
+n_following = remove_missing(n_following)
 n_following
 ```
 
@@ -425,15 +439,31 @@ users_repos_pre
 stars_clean
 n_stars_put = stars_clean[, .N, by = identity_id]
 setnames(n_stars_put, c('N', 'identity_id'), c('n_stars_put', 'id'))
-n_stars_put = n_stars_put[!is.na(id)]
+n_stars_put = remove_missing(n_stars_put)
 
 
 #Alternative version with preprocessed files
 n_stars_put
+col = c('login', 'identity_id')
+stars_clean[, ..col]
+n_stars_put[]
+is_true = merge.data.table(
+  x = n_stars_put,
+  y = n_following,
+  by = 'login'
+)
+is_really_true = merge.data.table(
+  x = is_true,
+  y = users_clean,
+  by = 'login',
+)
+
+is_really_true
 ```
 
 ### Received
 ```{r}
+stars_clean
 stars_per_repo = stars_clean[, .N, by = repo_id]
 stars_per_repo
 users_repos
@@ -443,7 +473,8 @@ stars_per_user = merge.data.table(
   by.x = 'repo_id',
   by.y = 'repo_id'
 )
-n_stars_received = stars_per_user[, sum(N), by = author_id]
+stars_per_user
+n_stars_received = stars_per_user[, sum(N), by = author_login]
 setnames(n_stars_received, c('author_id', 'V1'), c('id', 'n_stars_received'))
 n_stars_received = n_stars_received[!is.na(id)]
 n_stars_received
@@ -483,8 +514,7 @@ reactions_per_issue = merge.data.table(
   by.x = c('repo_id', 'issue_number'),
   by.y = c('repo_id', 'issue_number')
 )
-reaction_per_issue
-n_issue_reactions_received = reaction_per_issue[, .N, by = author_id.x]
+n_issue_reactions_received = reactions_per_issue[, .N, by = author_id.x]
 n_issue_reactions_received
 setnames(n_issue_reactions_received, c('author_id.x', 'N'), c('id', 'n_issue_reactions_received'))
 n_issue_reactions_received = n_issue_reactions_received[!is.na(id)]
@@ -547,7 +577,7 @@ n_commits_pre = contributions[, sum(nb_commits), by = user_id]
 setnames(n_commits_pre, c('user_id', 'V1'), c('id', 'n_commits'))
 n_commits_pre = n_commits_pre[!is.na(id)]
 
-n_commits_pre
+n_commits
 ```
 ## Commit comments
 ### Posted
@@ -716,21 +746,21 @@ sources
 ```
 ## Repo downloads
 ```{r}
-usage
-
-repo_downloads = usage[, sum(downloads), by = repo_id]
-setnames(repo_downloads, 'V1', 'n_downloads')
-repo_downloads = repo_downloads[!is.na(repo_id)]
-users_repos_pre
-users_downloads = merge.data.table(
-  x = users_repos_pre,
-  y = repo_downloads,
-  by = 'repo_id'
-)
-n_downloads = users_downloads[, sum(n_downloads), by = author_id]
-setnames(n_downloads, c('author_id', 'V1'), c('id', 'n_downloads'))
-n_downloads = n_downloads[!is.na(id)]
-repo_downloads
+# usage
+# 
+# repo_downloads = usage[, sum(downloads), by = repo_id]
+# setnames(repo_downloads, 'V1', 'n_downloads')
+# repo_downloads = repo_downloads[!is.na(repo_id)]
+# users_repos_pre
+# users_downloads = merge.data.table(
+#   x = users_repos_pre,
+#   y = repo_downloads,
+#   by = 'repo_id'
+# )
+# n_downloads = users_downloads[, sum(n_downloads), by = author_id]
+# setnames(n_downloads, c('author_id', 'V1'), c('id', 'n_downloads'))
+# n_downloads = n_downloads[!is.na(id)]
+# repo_downloads
 ```
 
 ```{r}
@@ -773,6 +803,9 @@ users_with_scores = merge.data.table(
   all.x = T
 )
 users_with_scores[is.na(n_followers), n_followers := 0]
+
+users_with_scores[n_followers != 0]
+
 users_with_scores = merge.data.table(
   x = users_with_scores,
   y = n_following,
@@ -1005,17 +1038,6 @@ users_with_scores = merge.data.table(
 )
 
 users_with_scores[is.na(n_being_watched_from), n_being_watched_from := 0]
-
-users_with_scores = merge.data.table(
-  x = users_with_scores,
-  y = n_downloads,
-  by.x = 'id',
-  by.y = 'id',
-  all.x = T
-)
-
-users_with_scores[is.na(n_downloads), n_downloads := 0]
-users_with_scores[n_downloads == 0]
 ```
 
 ```{r}
@@ -1030,7 +1052,7 @@ users_aggregate = users_with_scores[, ':='(social_popularity =
 #                                          n_pull_request_reactions_received,
 #                                          n_pull_request_comment_reactions_received,
                                           n_being_watched_from,
-                                      social_activity =
+                                          social_activity =
                                           n_following +
                                           n_stars_put +
 #                                          n_issue_reactions_put,
@@ -1039,57 +1061,30 @@ users_aggregate = users_with_scores[, ':='(social_popularity =
 #                                          n_pull_request_reactions_put,
 #                                          n_pull_request_comment_reactions_put,
                                           n_repo_watched_per_user,
-#                                      working_popularity = 
+#                                      working_popularity =
 #                                        sum(n_issue_comments_received,
 #                                            n_commit_comments_received,
 #                                            n_pull_request_comments_received),
                                       working_activity = 
                                             n_issues_posted +
-                                            n_issue_comments_posted +
-                                            n_commit_comments_posted +
+                                           n_issue_comments_posted +
+                                           n_commit_comments_posted +
                                             n_pull_request_comments_posted +
                                             n_commits +
                                             n_pull_requests)]
 
-users_aggregate_log = users_with_scores[, ':='(social_popularity =
-                                          log(n_followers 
-                                              + n_stars_received 
-                                              +n_being_watched_from),
-#                                          n_issue_reactions_received,
-#                                          n_issue_comment_reactions_received,
-#                                          n_commit_comment_reactions_received,
-#                                          n_pull_request_reactions_received,
-#                                          n_pull_request_comment_reactions_received,
-                                          
-                                      social_activity =log(
-                                          n_following +
-                                          n_stars_put +
-#                                          n_issue_reactions_put,
-#                                          n_issue_comment_reactions_put,
-#                                          n_commit_comment_reactions_put,
-#                                          n_pull_request_reactions_put,
-#                                          n_pull_request_comment_reactions_put,
-                                          n_repo_watched_per_user),
-#                                      working_popularity = 
-#                                        sum(n_issue_comments_received,
-#                                            n_commit_comments_received,
-#                                            n_pull_request_comments_received),
-                                      working_activity = 
-                                            log(n_issues_posted +
-                                            n_issue_comments_posted +
-                                            n_commit_comments_posted +
-                                            n_pull_request_comments_posted +
-                                            n_commits +
-                                            n_pull_requests))]
-users_aggregate = users_aggregate[social_popularity > 0 & social_activity > 0 & working_activity > 5 & is_bot.x == 'f']
-users_aggregate_log = users_aggregate_log[social_popularity > 0 & social_activity > 0 & working_activity > 0 & is_bot.x == 'f']
-users_aggregate[n_downloads != 0]
+users_aggregate = users_aggregate[(social_activity > 10) &(working_activity > 10) & (social_popularity > 10)]
+users_aggregate_log = copy(users_aggregate)
+users_aggregate_log = users_aggregate_log[, ':='(
+  working_activity = log(working_activity, base = 10),
+  social_activity = log(working_activity, base = 10),
+  social_popularity = log(social_popularity, base = 10))
+  ]
+users_aggregate_log = users_aggregate_log[working_activity <4 & social_popularity < 3
+  ]
+users_aggregate_log[, 'social_activity']
 ```
 
-## Let's try to open the preprocessed CSV
-```{r}
-read.csv()
-```
 
 # Exploring distributions
 ##Basic info
@@ -1105,7 +1100,7 @@ ggplot(users_with_scores) + geom_density(aes(n_downloads, ..scaled..)) + scale_x
 
 ## Regression on various scores
 ```{r}
-lm = lm(formula = n_stars_received ~ 
+lm = lm(formula = n_commit_comments_posted ~ 
 #          n_following
 #        + n_stars_put 
 #        + n_stars_received 
@@ -1133,17 +1128,20 @@ lm = lm(formula = n_stars_received ~
 summary(lm)
 ```
 ```{r}
-lm = lm(formula = n_commit_comments_posted ~ n_commit_comment_reactions_received, data = users_with_scores)
+lm = lm(formula = social_popularity ~ working_activity, data = users_aggregate_log)
 summary(lm)
 ```
-# Most working active users are the ones that are more followed
-```{r}
-x = 10:10000
-df = data.frame(x)
-```
+# Most working active users cannot be ignored
+
 
 ```{r}
-ggplot(users_aggregate) + geom_point(aes(working_activity, social_popularity))+ scale_y_continuous(trans = 'log10') + scale_x_continuous(trans = 'log10')
+scale_factor = 'identity'
+ggplot(users_aggregate_log) + geom_point(aes(working_activity, social_popularity))+ scale_x_continuous(transform = scale_factor) + scale_y_continuous(transform = scale_factor)
+```
+But let's count how many belong to each group
+
+```{r}
+count(users_aggregate_log[social_popularity > 3 & social_popularity < 3.5 & working_activity < 4 & working_activity > 0])
 ```
 
 
@@ -1174,30 +1172,38 @@ useful_columns = c(
          #'n_pull_request_comment_reactions_received',
 #         'n_being_watched_from',
 #         'n_repo_watched_per_user'
-            'social_activity',
+#            'social_activity',
             'working_activity',
             'social_popularity')
 users_useful_features = users_aggregate_log[, ..useful_columns]
+users_useful_features = users_useful_features
 users_useful_features
 ```
 
 ```{r}
 #| label: K-Means clustering
 set.seed(42)
-n = 20
+n = 4
 km = kmeans(users_useful_features, n, iter.max = 100L)
-km$centers[3*n]
-df = data.frame(social_activity = km$centers[1:n], working_activity = km$centers[(n+1):(2*n)], social_popularity = km$centers[(2*n+1):(3*n)])
-df = df |> mutate(id = row_number())
-km
+#km$centers[3*n]
+#df = data.frame(social_activity = km$centers[1:n], working_activity = km$centers[(n+1):(2*n)], social_popularity = km$centers[(2*n+1):(3*n)])
+#df = df |> mutate(id = row_number())
+length(km$cluster)
 #ggplot(df, aes(working_activity, social_popularity)) + geom_point()
+km
+```
+```{r}
+#| label: Clustered users
+
+km$cluster
+users_aggregate_cluster = users_aggregate_log[, 'cluster' := km$cluster]
 ```
 
 ```{r}
 #| label: Analysis of popular, non-working people
 
-users_aggregate_log[km$cluster == 1 | km$cluster == 9 | km$cluster == 14]$n_being_watched_from
-summary(users_aggregate_log[km$cluster == 1 | km$cluster == 9 | km$cluster == 14])
+users_aggregate_log[km$cluster == 12 | km$cluster == 14]$n_being_watched_from
+summary(users_aggregate_log[km$cluster == 12 | km$cluster == 14])
 ggplot(users_aggregate, aes(n_being_watched_from)) + geom_density() + scale_x_log10()
 ```
 
@@ -1240,6 +1246,8 @@ ggplot(comparison_lucky) +
   xlab(col_of_interest) + 
   ylab('frequency')
 ```
+
+
 ```{r}
 #| label: Hard-working vs population graph comparisons: 
 
@@ -1525,7 +1533,7 @@ ggplot(data = users_aggregate, aes(social_popularity)) + geom_density() + scale_
 
 # Network analysis
 
-## Network representation: users connected by commits in the same repostitories
+## Network representation: users connected by commits in the same repositories
 ```{r}
 users_repos
 users_on_users = merge.data.table(
@@ -1543,12 +1551,13 @@ users_degree_repos = users[, .N, by = author_id.x]
 users_degree_repos
 df = data.frame(x = users_degree_repos[, N])
 ggplot(df, aes(x)) + geom_density() + scale_x_continuous(trans = 'log10')
+followers_clean_no_na = remove_missing(followers_clean, na.rm = T)
 ```
 
 
 ```{r}
-edges = data.frame("from" = users$author_id.x, "to" = users$author_id.y, stringsAsFactors = F )
-g <- graph.data.frame(edges, directed = F)
+edges = data.frame("from" = followers_clean_no_na$follower_id, "to" = followers_clean_no_na$followee_id, stringsAsFactors = F )
+g <- graph.data.frame(edges, directed = T)
 g_simplified = igraph::simplify(
   g, 
   remove.multiple = T,
@@ -1624,15 +1633,18 @@ bootstrap_p(m_m, no_of_sims = 20, threads = 4)
 edge_density(g, loops = F)
 ```
 
+Let's
+
 ```{r}
 #| label: Clustering coefficient
 
-transitivity(g, type = 'global')
+transitivity(g, type = ')
 ```
+
 ```{r}
 #| label: Diameter
 
-diameter(g, directed=F)
+diameter(g, directed=T)
 ```
 
 ```{r}
@@ -1645,17 +1657,165 @@ centr_degree(g)$centralization
 
 ```{r}
 #| label: Cliques
-cliques(g)
+cliques_of_followers = cliques(g)
 ```
 
 ```{r}
 #| label: Cluster edge betwenness
 
-ceb <- cluster_edge_betweenness(g) 
-dendPlot(ceb, mode="hclust")
+ceb <- coreness(g)
+ceb
+colrs <- adjustcolor( c("gray50", "tomato", "gold", "yellowgreen"), alpha=.6)
+tmp = data.frame(x = ceb)
+ceb_indexed = data.frame(x = as.numeric(rownames(tmp)), y = tmp[, 1])
+ceb_indexed
+users_aggregate
+users_aggregate_with_clusters = merge.data.table(
+  x = users_aggregate,
+  y = ceb_indexed,
+  by.x = 'id',
+  by.y = 'x'
+)
+setnames(users_aggregate_with_clusters, 'y', 'cluster')
+users_aggregate[n_commits != 0]
+users_aggregate_with_clusters
+aggregate_clusters = users_aggregate_with_clusters[, mean(n_stars_received), by = 'cluster']
+aggregate_clusters
+ggplot(data = aggregate_clusters, aes(V1)) + geom_density() + scale_x_l
+plot(, vertex.size=ceb*6, vertex.label=ceb, vertex.color=colrs[ceb])
 ```
 
 ```{r}
-modularity(ceb)
+assortativity_degree(g)
 ```
 
+
+# Influencers disjoint from hard workers?
+
+## Analysis on followers
+
+```{r}
+followers_clean_no_na = remove_missing(followers_clean, na.rm = T)
+edges = data.frame("from" = followers_clean_no_na$follower_id, "to" = followers_clean_no_na$followee_id, stringsAsFactors = F )
+g <- graph.data.frame(edges, directed = T)
+V(g)$name = as.numeric(V(g)$name)
+```
+
+```{r}
+#| label: Inserting the cluster attribute
+
+users_aggregate_cluster[id %in% V(g)$name]
+
+tmp = setDT(data.frame(V(g)$name))
+setnames(tmp, 'V.g..name', 'id')
+tmp$index = 1:nrow(tmp)
+tmp
+
+users_aggregate_cluster_ingraph = merge.data.table(
+  x = tmp,
+  y = users_aggregate_cluster,
+  by = 'id',
+  all.x = T
+)
+
+users_aggregate_cluster_ingraph = users_aggregate_cluster_ingraph[is.na(cluster), cluster := 0]
+users_aggregate_cluster_ingraph[cluster != 0]
+users_aggregate_cluster_ingraph = users_aggregate_cluster_ingraph[order(users_aggregate_cluster_ingraph$index)]
+users_aggregate_cluster_ingraph
+V(g)
+
+# Set attributes
+g <- set_vertex_attr(g, name = 'cluster', value = users_aggregate_cluster_ingraph$cluster)
+V(g)$cluster
+g = delete.vertices(g, V(g)[cluster == 0])
+g_extremes = delete.vertices(g, V(g)[cluster == 2 | cluster == 3])
+length(g)
+plot(g)
+```
+```{r}
+modularity(g_extremes, V(g_extremes)$cluster)
+```
+
+```{r}
+#| label: Plot
+length(V(g))
+
+g_sample = delete.vertices(g, V(g)[sample(length(V(g)), 9300)])
+length(V(g_sample))
+colrs <- adjustcolor( c("gray50", "tomato", "gold", "yellowgreen"), alpha=.6)
+plot(g_sample, vertex.color=colrs[V(g_sample)$cluster], vertex.label = '')
+```
+```{r}
+transitivity(g)
+```
+
+## Analysis on repositories
+
+```{r}
+users_on_users = merge.data.table(
+  x = users_repos,
+  y = users_repos,
+  by = 'repo_id',
+  allow.cartesian = T
+)
+
+v= c('author_id.x', 'author_id.y')
+users_on_users
+users_directed = users_on_users[author_id.x != author_id.y, ..v]
+```
+
+```{r}
+edges = data.frame("from" = users_directed$author_id.x, "to" = users_directed$author_id.y, stringsAsFactors = F )
+g <- graph.data.frame(edges, directed = F)
+V(g)$name = as.numeric(V(g)$name)
+V(g)
+```
+
+```{r}
+#| label: Inserting the cluster attribute
+
+users_aggregate_cluster[id %in% V(g)$name]
+
+tmp = setDT(data.frame(V(g)$name))
+tmp
+setnames(tmp, 'V.g..name', 'id')
+tmp$index = 1:nrow(tmp)
+tmp
+
+users_aggregate_cluster_ingraph = merge.data.table(
+  x = tmp,
+  y = users_aggregate_cluster,
+  by = 'id',
+  all.x = T
+)
+
+users_aggregate_cluster_ingraph = users_aggregate_cluster_ingraph[is.na(cluster), cluster := 0]
+users_aggregate_cluster_ingraph[cluster != 0]
+users_aggregate_cluster_ingraph = users_aggregate_cluster_ingraph[order(users_aggregate_cluster_ingraph$index)]
+users_aggregate_cluster_ingraph
+V(g)
+
+# Set attributes
+g <- set_vertex_attr(g, name = 'cluster', value = users_aggregate_cluster_ingraph$cluster)
+V(g)$cluster
+g = delete.vertices(g, V(g)[cluster == 0])
+g_extremes = delete.vertices(g, V(g)[cluster == 2 | cluster == 3])
+g
+```
+
+```{r}
+modularity(g_extremes, V(g_extremes)$cluster)
+```
+
+```{r}
+#| label: Plot
+length(V(g))
+
+g_sample = delete.vertices(g, V(g)[sample(length(V(g)), 9300)])
+length(V(g_sample))
+colrs <- adjustcolor( c("gray50", "tomato", "gold", "yellowgreen"), alpha=.6)
+plot(g_sample, vertex.color=colrs[V(g_sample)$cluster], vertex.label = '')
+```
+```{r}
+transitivity(g)
+```
