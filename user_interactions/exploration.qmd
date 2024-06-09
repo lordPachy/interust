@@ -2005,7 +2005,8 @@ And now, let's try to do it time-step by time-step
 ggplot(contributions_with_stars[timestamp_diff == 7], aes(commits, stars_diff)) + geom_point() + scale_x_log10() + scale_y_log10()
 ```
 
-# Sponsorships and the distance from top users
+# Sponsorships and distance from top users
+## Cleaning
 
 Let's see what's inside the sponsorship table.
 
@@ -2067,6 +2068,7 @@ graph2
 distances(graph2, mode="out")
 ```
 
+## To top users
 
 Let's see the distance:
 
@@ -2094,6 +2096,8 @@ And now, we can actually plot it
 ggplot(distance_st_min, aes(distance)) + geom_histogram()
 ```
 
+## From top users
+
 Let's do everything in the opposite order:
 
 ```{r}
@@ -2104,22 +2108,22 @@ distance_sponsored_topg_reversed = distances(graph = g,
                )
 
 rownames(distance_sponsored_topg)
-distance_sponsored_topg_reversed
-distance_st_min_rev = apply(distance_sponsored_topg_reversed, 1, FUN = min)
+distance_sponsored_topg_reversed[is.infinite(distance_sponsored_topg_reversed)] = NA
+distance_st_min_rev = apply(distance_sponsored_topg_reversed, 1, FUN = mean, na.rm= T)
 distance_st_min_rev
 distance_st_min_rev = setDT(data.frame(distance_st_min_rev))
 distance_st_min_rev
 setnames(distance_st_min_rev, 'distance_st_min_rev', 'distance')
 colnames(distance_st_min)
 nrow(distance_st_min_rev[distance == Inf])
-distance_st_min_rev[distance == Inf]$distance = 6
+#distance_st_min_rev[distance == Inf]$distance = 6
 ```
 
 
 And now, we can actually plot it
 
 ```{r}
-ggplot(distance_st_min_rev, aes(distance)) + geom_histogram()
+ggplot(distance_st_min_rev, aes(distance)) + geom_density()
 ```
 
 
@@ -2130,9 +2134,30 @@ all_distances = mean_distance(g, directed = T, unconnected = T)
 all_distances
 ```
 
+```{r}
+distance_all_topg_reversed = distances(graph = g,
+               to = V(g)[cluster == 1],
+               mode = 'in'
+               )
+
+rownames(distance_sponsored_topg)
+distance_all_topg_reversed[is.infinite(distance_all_topg_reversed)] = 10
+distance_at_min_rev = apply(distance_all_topg_reversed, 1, FUN = min, na.rm= T)
+distance_st_min_rev
+distance_at_min_rev = setDT(data.frame(distance_at_min_rev))
+distance_st_min_rev
+setnames(distance_at_min_rev, 'distance_at_min_rev', 'distance')
+colnames(distance_st_min)
+nrow(distance_st_min_rev[distance == Inf])
+#distance_st_min_rev[distance == Inf]$distance = 6
+```
+
+```{r}
+ggplot(distance_at_min_rev, aes(distance)) + geom_histogram()
+```
 WOW!!!
 
-
+## From influencers
 
 We can try to check how the situation goes with influencers:
 
@@ -2145,18 +2170,19 @@ distance_sponsored_influencers_reversed = distances(graph = g,
 
 rownames(distance_sponsored_topg)
 distance_sponsored_influencers_reversed
-distance_si_min_rev = apply(distance_sponsored_influencers_reversed, 1, FUN = min)
+distance_sponsored_influencers_reversed[is.infinite(distance_sponsored_influencers_reversed)] = NA
+distance_si_min_rev = apply(distance_sponsored_influencers_reversed, 1, FUN = mean, na.rm = T)
 distance_si_min_rev
 distance_si_min_rev = setDT(data.frame(distance_si_min_rev))
 distance_si_min_rev
 setnames(distance_si_min_rev, 'distance_si_min_rev', 'distance')
 colnames(distance_si_min_rev)
 nrow(distance_si_min_rev[distance == Inf])
-distance_si_min_rev[distance == Inf]$distance = 6
+#distance_si_min_rev[distance == Inf]$distance = 6
 ```
 
 ```{r}
-ggplot(distance_si_min_rev, aes(distance)) + geom_histogram()
+ggplot(distance_si_min_rev, aes(distance)) + geom_density()
 ```
 
 #A bit of exploration on the graph
