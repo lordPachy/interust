@@ -31,10 +31,14 @@ library(FPDclustering)
 #install.packages('jaccard')
 #install.packages('bayesbio')
 library('bayesbio')
-#install.packages('gbm')
+#install.packages('gbm3')
 library('gbm')
 #install.packages('iGraphMatch')
 library(iGraphMatch)
+#install.packages('viridis')
+library('viridis')
+#install.packages('caret')
+library('caret')
 #remotes::install_github('mlampros/ClusterR', upgrade = 'always', dependencies = TRUE, repos = 'https://cloud.r-project.org/')
 ```
 
@@ -2202,6 +2206,122 @@ reciprocity_total = reciprocity(g, mode = 'ratio')
 reciprocity_total
 ```
 
+```{r}
+transitivity(g_influencers, type = 'global')
+triad_census(g_influencers)
+closeness(g_influencers, mode = 'out', normalized = T)$closeness
+```
+
+```{r}
+transitivity(g_topg, type = 'global')
+triad_census(g_topg)
+```
+
+```{r}
+transitivity(g, type = 'global')
+```
+
+```{r}
+topg_betweenness = betweenness(g, v = V(g)[V(g)$cluster == 4])
+topg_betweenness
+topg_betweenness = setDT(data.frame(topg_betweenness))
+topg_betweenness
+mean(topg_betweenness$topg_betweenness)
+```
+
+```{r}
+influencers_betweenness = betweenness(g, v = V(g)[V(g)$cluster == 1])
+influencers_betweenness
+influencers_betweenness = setDT(data.frame(influencers_betweenness))
+influencers_betweenness
+mean(influencers_betweenness$influencers_betweenness)
+```
+
+```{r}
+useless_betweenness = betweenness(g, v = V(g)[V(g)$cluster == 2 | V(g)$cluster == 3])
+useless_betweenness = setDT(data.frame(useless_betweenness))
+mean(useless_betweenness$useless_betweenness)
+```
+
+## Hub and authority score
+
+```{r}
+hs = hub_score(g)
+list(hs$vector)
+hs_clean = data.frame(hs$vector)
+hs_clean$id = as.numeric(rownames(hs_clean))
+users_network_info = merge.data.table(
+  x = users_aggregate_cluster,
+  y = hs_clean,
+  by = 'id'
+)
+
+users_network_info[, c('hs.vector')]
+setnames(users_network_info, 'hs.vector', 'hub_score')
+```
+
+We can now plot the distribution of the hubs scores: to which groups do they belong?
+
+```{r}
+users_network_info = users_network_info[order(-users_network_info$hub_score)]
+ggplot(users_network_info[1:100, ], aes(cluster)) +
+  geom_histogram(theme()) +
+  ylab('Hub score') + 
+  scale_x_continuous(name ="Type of user",
+                     labels=c('1' = "Influencers", '2' = "Ants", '3'= "Small users", '4'= "Top users"))
+```
+
+```{r}
+as = authority_score(g)
+as_clean = data.frame(as$vector)
+as_clean$id = as.numeric(rownames(as_clean))
+users_network_info = merge.data.table(
+  x = users_network_info,
+  y = as_clean,
+  by = 'id'
+)
+
+setnames(users_network_info, 'as.vector', 'authority_score')
+users_network_info = users_network_info[order(-users_network_info$authority_score)]
+
+users_network_info[, c('authority_score')]
+```
+
+We can now plot the distribution of the hubs scores: to which groups do they belong?
+
+```{r}
+users_network_info = users_network_info[order(-users_network_info$authority_score)]
+ggplot(users_network_info[1:500, ], aes(cluster)) +
+  geom_histogram(aes(colour = cluster)) +
+  ylab('Top 500 per authority score') + 
+  scale_x_continuous(name ="Type of user",
+                     labels=c('1' = "Influencers", '2' = "Ants", '3'= "Small users", '4'= "Top users"))
+```
+
+```{r}
+out_degree =  users_aggregate_cluster[, mean(n_following), by = cluster]
+out_degree
+```
+```{r}
+distance_inf_topg = distances(graph = g,
+               v = V(g)[V(g)$cluster == 1],
+               to = V(g)[cluster == 4],
+               mode = 'out'
+               )
+distance_inf_topg = data.frame(distance_inf_topg)
+distance_inf_topg
+distance_inf_topg[is.infinite(distance_inf_topg)] = NA
+distance_inf_topg
+mean_distance_inf_topg =mean(distance_inf_topg, rm.na = T)
+
+distance_topg_inf = distances(graph = g,
+               v = V(g)[V(g)$cluster == 1],
+               to = V(g)[cluster == 4],
+               mode = 'in'
+               )
+distance_topg_inf =mean(distance_topg_inf)
+mean_distance_inf_topg
+```
 
 # Is followers a sublinear BA model?
 
@@ -2231,15 +2351,91 @@ gm(g_label_clustered, g_ba_theoretical)
 # Model for predicting followers
 
 ```{r}
+colnames(users_aggregate)
+users_aggregate_model = copy(users_aggregate)
+users_aggregate_model = users_aggregate_model[, ':='(id = NULL,
+                                               user_id = NULL,
+                                               login = NULL,
+                                               created_at = NULL,
+                                               attributes = NULL,
+                                               is_bot.x = NULL,
+                                               creation_identity = NULL,
+                                               social_popularity = NULL,
+                                               social_activity = NULL,
+                                               working_activity = NULL)]
 users_aggregate
+colnames(users_aggregate_model)
+model_trained = gbm(formula = n_followers ~ .,
+        data = users_aggregate_model)
 
-model_trained = gbm(formula = n_followers ~ 
-          n_following,
-        data = users_aggregate)
 
-
-summary(model_trained)
+summary(model_trained, order = T, plotit = F)
+print(model_trained)
 ```
+
+Let's try to see some metrics about this tree
+
+```{r}
+relative.influence(model_trained, scale = T, sort = T)
+
+plot(x = model_trained,
+     i.var = c('n_following'),
+     level.plot = T
+    )
+```
+
+Other tests
+
+```{r}
+gbm.perf(object = model_trained)
+```
+```{r}
+permutation.test.gbm(model_trained, n.trees = 100)
+```
+
+
+## Model testing
+
+```{r}
+set.seed(42)
+intrain <- createDataPartition(y=users_aggregate_model$n_followers, p=0.7, list=FALSE)
+train = users_aggregate_model[intrain]
+test = users_aggregate_model[-intrain]
+```
+
+
+```{r}
+model_trained = gbm(formula = n_followers ~ .,
+                    data = train)
+
+best_iter = gbm.perf(model_trained)
+predictions = predict(model_trained, test, n.trees = best_iter)
+ss_total = sum((test$n_followers - mean(test$n_followers))^2)
+ss_residual = sum((test$n_followers - predictions)^2)
+r_squared = 1 - ss_residual/ss_total
+
+r_squared
+```
+
+
+```{r}
+gbm.roc.area(obs = test$n_followers,
+             pred = predictions)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
