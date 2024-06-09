@@ -33,6 +33,8 @@ library(FPDclustering)
 library('bayesbio')
 #install.packages('gbm')
 library('gbm')
+#install.packages('iGraphMatch')
+library(iGraphMatch)
 #remotes::install_github('mlampros/ClusterR', upgrade = 'always', dependencies = TRUE, repos = 'https://cloud.r-project.org/')
 ```
 
@@ -1201,6 +1203,13 @@ km$cluster
 users_aggregate_cluster = users_aggregate_log[, 'cluster' := km$cluster]
 ```
 
+## A graph of clusters
+
+```{r}
+ggplot(users_aggregate_cluster, aes(working_activity, social_popularity, colour = cluster)) + geom_point()
+```
+
+
 ```{r}
 #| label: Analysis of popular, non-working people
 
@@ -1729,13 +1738,16 @@ V(g)
 # Set attributes
 g <- set_vertex_attr(g, name = 'cluster', value = users_aggregate_cluster_ingraph$cluster)
 V(g)$cluster
-g = delete.vertices(g, V(g)[cluster == 0])
+g_extremes = delete.vertices(g, V(g)[cluster == 0])
 g_extremes = delete.vertices(g, V(g)[cluster == 2 | cluster == 3])
 length(g)
-plot(g)
+V(g)
 ```
 ```{r}
 modularity(g_extremes, V(g_extremes)$cluster)
+```
+```{r}
+mean_distance(g_extremes, directed = T, unconnected = T)
 ```
 
 ```{r}
@@ -1992,6 +2004,203 @@ And now, let's try to do it time-step by time-step
 ```{r}
 ggplot(contributions_with_stars[timestamp_diff == 7], aes(commits, stars_diff)) + geom_point() + scale_x_log10() + scale_y_log10()
 ```
+
+# Sponsorships and the distance from top users
+
+Let's see what's inside the sponsorship table.
+
+```{r}
+sponsors_user
+
+sponsors_user_clean = sponsors_user[, created_at := anytime(created_at)]
+sponsors_user_clean
+
+#First sponsorship
+
+
+```
+
+Now, we can select all the users that have been sponsored at least once
+
+```{r}
+sponsored_users = unique(sponsors_user[, 'sponsored_id'])
+
+sponsored_users
+```
+
+Let's now check for the intersection between vertices and sponsored_users
+
+```{r}
+vertices = setDT(list(V(g)$name))
+
+setnames(vertices, 'V1', 'id')
+
+sponsored_vertices = merge.data.table(
+  x = vertices,
+  y = sponsored_users,
+  by.x = 'id',
+  by.y = 'sponsored_id'
+)
+
+sponsored_vertices
+V(g)[name %in% unlist(sponsored_vertices)]
+```
+
+We can do a demo of distances to understand how it actually works.
+
+```{r}
+graph <- make_ring(10)
+d = distances(graph)
+d
+d_min = apply(d, 1, FUN = max)
+d_min
+shortest_paths(graph, 5)
+all_shortest_paths(graph, 1, 6:8)
+mean_distance(graph)
+## Weighted shortest paths
+el <- matrix(ncol=3, byrow=TRUE,
+             c(1,2,0, 1,3,2, 1,4,1, 2,3,0, 2,5,5, 2,6,2, 3,2,1, 3,4,1,
+               3,7,1, 4,3,0, 4,7,2, 5,6,2, 5,8,8, 6,3,2, 6,7,1, 6,9,1,
+               6,10,3, 8,6,1, 8,9,1, 9,10,4) )
+graph2 <- add_edges(make_empty_graph(10), t(el[,1:2]), weight=el[,3])
+graph2
+distances(graph2, mode="out")
+```
+
+
+Let's see the distance:
+
+```{r}
+distance_sponsored_topg = distances(graph = g,
+               v = V(g)[name %in% unlist(sponsored_vertices)],
+               to = V(g)[cluster == 4],
+               mode = 'out'
+               )
+
+rownames(distance_sponsored_topg)
+
+distance_st_min = apply(distance_sponsored_topg, 1, FUN = min)
+distance_st_min = setDT(data.frame(distance_st_min))
+setnames(distance_st_min, 'distance_st_min', 'distance')
+colnames(distance_st_min)
+nrow(distance_st_min[distance == Inf])
+distance_st_min[distance == Inf]$distance = 7
+```
+
+
+And now, we can actually plot it
+
+```{r}
+ggplot(distance_st_min, aes(distance)) + geom_histogram()
+```
+
+Let's do everything in the opposite order:
+
+```{r}
+distance_sponsored_topg_reversed = distances(graph = g,
+               v = V(g)[name %in% unlist(sponsored_vertices)],
+               to = V(g)[cluster == 4],
+               mode = 'in'
+               )
+
+rownames(distance_sponsored_topg)
+distance_sponsored_topg_reversed
+distance_st_min_rev = apply(distance_sponsored_topg_reversed, 1, FUN = min)
+distance_st_min_rev
+distance_st_min_rev = setDT(data.frame(distance_st_min_rev))
+distance_st_min_rev
+setnames(distance_st_min_rev, 'distance_st_min_rev', 'distance')
+colnames(distance_st_min)
+nrow(distance_st_min_rev[distance == Inf])
+distance_st_min_rev[distance == Inf]$distance = 6
+```
+
+
+And now, we can actually plot it
+
+```{r}
+ggplot(distance_st_min_rev, aes(distance)) + geom_histogram()
+```
+
+
+But let's check if the distance between the nodes is mostly one:
+
+```{r}
+all_distances = mean_distance(g, directed = T, unconnected = T)
+all_distances
+```
+
+WOW!!!
+
+
+
+We can try to check how the situation goes with influencers:
+
+```{r}
+distance_sponsored_influencers_reversed = distances(graph = g,
+               v = V(g)[name %in% unlist(sponsored_vertices)],
+               to = V(g)[cluster == 1],
+               mode = 'in'
+               )
+
+rownames(distance_sponsored_topg)
+distance_sponsored_influencers_reversed
+distance_si_min_rev = apply(distance_sponsored_influencers_reversed, 1, FUN = min)
+distance_si_min_rev
+distance_si_min_rev = setDT(data.frame(distance_si_min_rev))
+distance_si_min_rev
+setnames(distance_si_min_rev, 'distance_si_min_rev', 'distance')
+colnames(distance_si_min_rev)
+nrow(distance_si_min_rev[distance == Inf])
+distance_si_min_rev[distance == Inf]$distance = 6
+```
+
+```{r}
+ggplot(distance_si_min_rev, aes(distance)) + geom_histogram()
+```
+
+#A bit of exploration on the graph
+## Are the groups following reciprocals?
+
+```{r}
+g_influencers = delete_vertices(g, V(g)[cluster != 1])
+g_topg = delete_vertices(g, V(g)[cluster != 4])
+```
+
+
+```{r}
+reciprocity_influencers = reciprocity(g_influencers, mode = 'ratio')
+reciprocity_topg = reciprocity(g_topg, mode = 'ratio')
+reciprocity_total = reciprocity(g, mode = 'ratio')
+
+reciprocity_total
+```
+
+
+# Is followers a sublinear BA model?
+
+First of all, we want to determine the characteristic of our model.
+
+```{r}
+g_label_clustered = delete_vertices(g, V(g)[V(g)$cluster == 0])
+n = vcount(g)
+m = ecount(g)
+```
+
+Now we can create the BA model:
+
+```{r}
+g_ba_theoretical = sample_pa(n = n,
+                             power = 0.5
+                             )
+```
+
+And now we can confront the two.
+
+```{r}
+gm(g_label_clustered, g_ba_theoretical)
+```
+
 
 # Model for predicting followers
 
