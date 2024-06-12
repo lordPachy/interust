@@ -39,7 +39,13 @@ library(iGraphMatch)
 library('viridis')
 #install.packages('caret')
 library('caret')
+#install.packages('ranger')
+library(ranger)
 #remotes::install_github('mlampros/ClusterR', upgrade = 'always', dependencies = TRUE, repos = 'https://cloud.r-project.org/')
+#install.packages('gmodels')
+library(gmodels)
+#install.packages('h2o')
+library(h2o)
 ```
 
 ## Importing data
@@ -1081,6 +1087,7 @@ users_aggregate = users_with_scores[, ':='(social_popularity =
                                             n_commits +
                                             n_pull_requests)]
 
+
 users_aggregate = users_aggregate[(social_activity > 10) &(working_activity > 10) & (social_popularity > 10)]
 users_aggregate_log = copy(users_aggregate)
 users_aggregate_log = users_aggregate_log[, ':='(
@@ -1548,7 +1555,7 @@ ggplot(data = users_aggregate, aes(social_popularity)) + geom_density() + scale_
 
 # Network analysis
 
-## Network representation: users connected by commits in the same repositories
+## Network representation: users connected by follow
 ```{r}
 users_repos
 users_on_users = merge.data.table(
@@ -1618,7 +1625,14 @@ transitivity(g)
 ```{r}
 average.path.length(g)
 mean_distance(g)
-ggplot(data = data.frame(x = degree_distribution(g)), aes(x)) + geom_density() + scale_x_log10() + scale_y_log10()
+g_degree = degree(g, loops = F, mode = 'in')
+
+g_degree_table = setDT(data.frame(g_degree))
+g_degree_table
+g_degree_table = g_degree_table[, .N, by = g_degree]
+g_degree_table[order(g_degree)]
+
+ggplot(data = g_degree_table, aes(x = g_degree, y = N)) + geom_point() + scale_x_log10() + scale_y_log10()
 ```
 
 
@@ -2349,10 +2363,11 @@ gm(g_label_clustered, g_ba_theoretical)
 
 
 # Model for predicting followers
+## GBM
 
 ```{r}
 colnames(users_aggregate)
-users_aggregate_model = copy(users_aggregate)
+users_aggregate_model = copy(users_with_scores)
 users_aggregate_model = users_aggregate_model[, ':='(id = NULL,
                                                user_id = NULL,
                                                login = NULL,
@@ -2360,10 +2375,10 @@ users_aggregate_model = users_aggregate_model[, ':='(id = NULL,
                                                attributes = NULL,
                                                is_bot.x = NULL,
                                                creation_identity = NULL,
+                                               working_activity = NULL,
                                                social_popularity = NULL,
-                                               social_activity = NULL,
-                                               working_activity = NULL)]
-users_aggregate
+                                               social_activity = NULL)]
+
 colnames(users_aggregate_model)
 model_trained = gbm(formula = n_followers ~ .,
         data = users_aggregate_model)
@@ -2407,7 +2422,6 @@ test = users_aggregate_model[-intrain]
 ```{r}
 model_trained = gbm(formula = n_followers ~ .,
                     data = train)
-
 best_iter = gbm.perf(model_trained)
 predictions = predict(model_trained, test, n.trees = best_iter)
 ss_total = sum((test$n_followers - mean(test$n_followers))^2)
@@ -2423,15 +2437,106 @@ gbm.roc.area(obs = test$n_followers,
              pred = predictions)
 ```
 
+## Ranger
 
+```{r}
+model_ranger = ranger(formula = n_followers ~ .,
+                    data = train)
+model_ranger
+```
 
+## Perceptron
 
+```{r}
+h2o.init()
+train_frame = as.h2o(train)
+test_frame = as.h2o(test)
 
+model_perceptron = h2o::h2o.deeplearning(y = 'n_followers',
+                                         training_frame = train_frame,
+                                         validation_frame = test_frame,
+                                         hidden  = c(200, 200, 200),
+                                         epochs = 30,
+                                         activation = 'Rectifier',
+                                         rate = 0.005)
+perf = h2o.performance(model_perceptron, test_frame)
+perf
+h2o.r2(model_perceptron, valid = T)
+h2o.accuracy(perf)
+```
 
+## Random forest
 
+```{r}
+train
+train_frame = as.h2o(train)
+model_xgboost = h2o.randomForest(y = 'n_followers',
+                         training_frame = train_frame
+                         )
 
+h2o.r2(model_xgboost)
+```
 
+## Simple regression
 
+```{r}
+train
+linear_model = lm(n_followers ~ .,
+   data = train)
+summary(linear_model)
+```
+
+```{r}
+test[n_commits > 0]
+```
+
+```{r}
+users_aggregate[n_commits>0]
+```
+
+```{r}
+users_with_scores[n_stars_received>0]
+```
+
+# Network defined on repositories
+
+```{r}
+contributions_raw = read.csv('/home/pachy/Desktop/ACSAI/interust/data/sample/examples/preprocessed/contributions.csv')
+
+contributions_raw = unique(contributions_raw[, c('repo_id', 'user_id')])
+contributions_raw
+```
+
+We can now aggregate users if they work on the same repositories
+
+```{r}
+users_on_repos = merge.data.table(
+  x = setDT(contributions_raw),
+  y = setDT(contributions_raw),
+  by = 'repo_id',
+  allow.cartesian = T
+)
+
+users_on_repos = users_on_repos[user_id.x != user_id.y]
+users_on_repos
+```
+
+```{r}
+edges = data.frame("from" = users_on_repos$user_id.x, "to" = users_on_repos$user_id.y, stringsAsFactors = F )
+g_ur <- graph.data.frame(edges, directed = F)
+```
+
+```{r}
+degree_users_on_repos = degree(g_ur, loops = F)
+degree_users_on_repos = setDT(data.frame(degree_users_on_repos))
+degree_distr_ur = degree_users_on_repos[, .N, by = degree_users_on_repos]
+degree_distr_ur[order(degree_users_on_repos)]
+ggplot(degree_distr_ur, aes(x = degree_users_on_repos, y = N)) +
+  geom_point() +
+  scale_y_log10() + 
+  scale_x_log10()
+
+```
 
 
 
