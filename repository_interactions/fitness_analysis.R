@@ -156,6 +156,18 @@ ggplot(degree_freq, aes(x = Degree, y = Frequency)) +
 
 
 
+## same behaviour if we take only in degrees, let's use undirected graph for
+## O(n log n) clustering
+# g_dep2 <- graph_from_data_frame(edges_dep, directed = TRUE)
+# lcc2 = largest_component(g_dep2)
+# lcc2 = simplify(lcc2, remove.loops = T, remove.multiple = T)
+# g_dep2 = lcc2
+# degree_values2 <- degree(g_dep2, mode='in')
+# hist(degree_values2, breaks = 50, main = "Degree Distribution", xlab = "Degree", ylab = "Frequency")
+# plot(degree_distribution(g_dep2), log = "xy", main = "Log-Log Degree Distribution", xlab = "Degree", ylab = "Frequency")
+
+
+
 # Network Centrality Measures
 betweenness_values <- betweenness(g_dep)
 closeness_values <- closeness(g_dep)
@@ -166,12 +178,60 @@ hist(betweenness_values, breaks = 50, main = "Betweenness Centrality", xlab = "B
 hist(closeness_values, breaks = 50, main = "Closeness Centrality", xlab = "Closeness")
 hist(eigenvector_values, breaks = 50, main = "Eigenvector Centrality", xlab = "Eigenvector")
 
-# communities
+################################## communities  ################################
 par(mfrow=c(1,1))
 # Reset margins to default
 par(mar = c(5.1, 4.1, 4.1, 2.1))
 communities <- cluster_louvain(g_dep)
 plot(communities, g_dep, vertex.size = 5, vertex.label = NA, main = "Community Detection")
+
+## cluster_fast_greedy is much slower
+# communities <- cluster_fast_greedy(g_dep)
+# plot(communities, g_dep, vertex.size = 5, vertex.label = NA, main = "Community Detection")
+
+plot(component_distribution(g_dep), log='xy')
+# Add community membership to the graph
+V(g_dep)$community <- communities$membership
+## (10mins )
+node_data <- data.table(
+  id = V(g_dep)$name,
+  degree = degree(g_dep),
+  betweenness = betweenness(g_dep),
+  closeness = closeness(g_dep),
+  community = V(g_dep)$community
+)
+
+# Scatter plot of degree vs betweenness  
+ggplot(node_data, aes(x = degree, y = betweenness, color = as.factor(community))) +
+  geom_point(alpha = 0.6) +
+  scale_color_discrete(name = "Community") +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x = "Degree", y = "Betweenness", title = "Node Degree vs Betweenness with Community Coloring") +
+  theme_minimal()
+
+
+# A better plot for the community visualization 
+# Assign colors based on community membership
+node_colors <- rainbow(length(unique(V(g_dep)$community)))[V(g_dep)$community]
+
+# Plot the graph with community colors
+plot(g_dep, vertex.color = node_colors, vertex.size = 5, vertex.label = NA, 
+     main = "Community Detection", edge.arrow.size = 0.5)
+
+# library(ggraph)
+# # install.packages('ggraph')
+# layout <- create_layout(g_dep, layout = 'fr')
+# ggraph(layout) +
+#   geom_edge_link(aes(color = as.factor(community)), show.legend = FALSE) +
+#   geom_node_point(aes(color = as.factor(community)), size = 3) +
+#   geom_node_text(aes(label = name), repel = TRUE, size = 2) +
+#   scale_color_discrete(name = "Community") +
+#   theme_void() +
+#   labs(title = "Network Community Detection")
+
+
+
 
 # plot the average number of degrees over time
 edges_temp <- data.frame(from = merged_data$repo_id, to = merged_data$dep_id, stringsAsFactors = FALSE)
@@ -928,6 +988,11 @@ final_vif <- vif(final_model)
 print(final_vif)
 
 
+### let's analyze dependencies between variables ######
+summary(lm(commits ~ active_developers, data = unique_attributes))
+summary(lm(downloads ~ stars, data = unique_attributes))
+summary(lm(downloads ~ num_contributors, data = unique_attributes))
+
 
 ########################## polynomial regression model #########################
 
@@ -977,29 +1042,25 @@ model_gbm <- gbm(
   cv.folds = 5  # Cross-validation folds
 )
 
-# Summary of the model
 summary(model_gbm)
 summary_gbm <- summary(model_gbm)
 
-# Normalize the relative influence for color scaling
-summary_gbm$color_intensity <- summary_gbm$rel.inf / max(summary_gbm$rel.inf)
+# # Normalize the relative influence for color scaling
+# summary_gbm$color_intensity <- summary_gbm$rel.inf / max(summary_gbm$rel.inf)
 
-# Plot the relative influence with gradient color
-ggplot(summary_gbm, aes(x = reorder(var, rel.inf), y = rel.inf, fill = color_intensity)) +
-  geom_bar(stat = "identity") +
+ggplot(summary_gbm, aes(x = reorder(var, rel.inf), y = rel.inf)) +
+  geom_bar(stat = "identity", fill = "blue") +
   coord_flip() +
-  scale_fill_gradient(low = "lightblue", high = "blue") +
+  # scale_fill_gradient(low = "lightblue", high = "blue") +
   labs(title = "Relative Influence of Variables",
        x = "Variable",
        y = "Relative Influence") +
   theme_minimal() +
-  theme(axis.text.y = element_text(size = 8)) +
-  guides(fill = FALSE)  # Remove the legend for fill
+  theme(axis.text.y = element_text(size = 8))
 
 # Get the best number of trees
 best_iter <- gbm.perf(model_gbm, method = "cv")
 
-# Predict on the training data
 predictions <- predict(model_gbm, newdata = unique_attributes, n.trees = best_iter)
 
 # Calculate R-squared
@@ -1007,14 +1068,12 @@ ss_total <- sum((unique_attributes$degree.x - mean(unique_attributes$degree.x))^
 ss_residual <- sum((unique_attributes$degree.x - predictions)^2)
 r_squared <- 1 - ss_residual / ss_total
 
-# Print R-squared
 cat("R-squared:", r_squared, "\n")
 
 # Calculate Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE)
 mae <- mean(abs(predictions - unique_attributes$degree.x))
 rmse <- sqrt(mean((predictions - unique_attributes$degree.x)^2))
 
-# Print MAE and RMSE
 cat("Mean Absolute Error (MAE):", mae, "\n")
 cat("Root Mean Squared Error (RMSE):", rmse, "\n")
 
@@ -1371,6 +1430,70 @@ ggplot(degree_growth_dt, aes(x = PreviousDegree, y = DegreeDiff)) +
 # "the rich get richer."
 
 
+
+triangle_triplet_metrics <- list()
+
+for (date in unique_dates) {
+  subset_data <- dependencies[timestamp == date, .(repo_id, dep_id)]
+  g <- graph_from_data_frame(subset_data, directed = TRUE)
+  
+  num_triangles <- count_triangles(g)
+  num_triplets <- sum(count_triangles(g, mode = "all") / 3)
+  
+  triangle_triplet_metrics[[as.character(date)]] <- list(
+    Date = date,
+    Triangles = num_triangles,
+    Triplets = num_triplets
+  )
+}
+
+triangle_triplet_dt <- rbindlist(triangle_triplet_metrics)
+triangle_triplet_dt[, Date := as.Date(Date, origin = "1970-01-01")]
+
+# Plot triangles and triplets over time
+ggplot(triangle_triplet_dt, aes(x = Date)) +
+  geom_line(aes(y = Triangles, color = "Triangles")) +
+  geom_line(aes(y = Triplets, color = "Triplets")) +
+  labs(title = "Triangles and Triplets Over Time", y = "Count", color = "Metric") +
+  theme_minimal()
+# The network is becoming increasingly sparse in terms of local clustering, 
+# supporting the earlier observation that the network may be growing in a 
+# tree-like or star-like structure.
+
+
+
+# Analyze local clustering coefficient distribution
+local_clustering <- transitivity(g, type = "local")
+local_clustering_dt <- data.table(Node = names(local_clustering), Clustering = local_clustering)
+ggplot(local_clustering_dt, aes(x = Clustering)) +
+  geom_histogram(binwidth = 0.01) +
+  labs(title = "Local Clustering Coefficient Distribution", x = "Local Clustering Coefficient", y = "Frequency") +
+  theme_minimal()
+# A large number of nodes have a local clustering coefficient of 0.
+# This indicates that many nodes are part of no triangles at all, meaning their 
+# neighbors are not interconnected.
+# Nodes with a local clustering coefficient of 1 are part of complete subgraphs 
+# where all neighbors are interconnected (fully connected cliques).
+# These nodes may be part of small, highly interconnected communities or clusters within the network.
+# There is a distribution of nodes with local clustering coefficients between 0 and 0.5.
+
+
+# Calculate local clustering coefficient and degree for each node
+local_clustering <- transitivity(g, type = "local")
+node_degree <- degree(g)
+
+# Create data table
+clustering_degree_dt <- data.table(Node = names(local_clustering), 
+                                   Clustering = local_clustering, 
+                                   Degree = node_degree)
+
+# Plot degree vs. local clustering coefficient
+ggplot(clustering_degree_dt, aes(x = Degree, y = Clustering)) +
+  geom_point(alpha = 0.3) +
+  scale_x_log10() +
+  labs(title = "Degree vs. Local Clustering Coefficient", x = "Degree (log scale)", y = "Local Clustering Coefficient") +
+  theme_minimal()
+  # theme_classic()
 
 #### TODO: still need to debug this part 
 # # ######### fitness
