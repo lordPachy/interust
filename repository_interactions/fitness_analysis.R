@@ -183,6 +183,7 @@ par(mfrow=c(1,1))
 # Reset margins to default
 par(mar = c(5.1, 4.1, 4.1, 2.1))
 communities <- cluster_louvain(g_dep)
+# communities = cluster_walktrap(g_dep)
 plot(communities, g_dep, vertex.size = 5, vertex.label = NA, main = "Community Detection")
 
 ## cluster_fast_greedy is much slower
@@ -203,8 +204,9 @@ node_data <- data.table(
 
 # Scatter plot of degree vs betweenness  
 ggplot(node_data, aes(x = degree, y = betweenness, color = as.factor(community))) +
+# ggplot(node_data, aes(x = degree, y = betweenness)) +
   geom_point(alpha = 0.6) +
-  scale_color_discrete(name = "Community") +
+  # scale_color_discrete(name = "Community") +
   scale_x_log10() +
   scale_y_log10() +
   labs(x = "Degree", y = "Betweenness", title = "Node Degree vs Betweenness with Community Coloring") +
@@ -232,8 +234,39 @@ plot(g_dep, vertex.color = node_colors, vertex.size = 5, vertex.label = NA,
 
 
 
+## with k means
+node_data <- data.table(
+  id = V(g_dep)$name,
+  degree = degree(g_dep),
+  betweenness = betweenness(g_dep),
+  closeness = closeness(g_dep)
+)
 
-# plot the average number of degrees over time
+# Perform K-means clustering on node metrics
+k <- 8  # or k <- 6
+kmeans_result <- kmeans(node_data[, .(degree, betweenness, closeness)], centers = k)
+
+# Assign K-means cluster to nodes
+node_data[, community := as.factor(kmeans_result$cluster)]
+V(g_dep)$community <- kmeans_result$cluster
+
+# Scatter plot of degree vs betweenness
+ggplot(node_data, aes(x = degree, y = betweenness, color = community)) +
+  geom_point(alpha = 0.6) +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x = "Degree", y = "Betweenness", title = "Node Degree vs Betweenness with K-means Clustering") +
+  theme_minimal()
+
+
+# 10 minutes to plot it
+# node_colors <- rainbow(length(unique(V(g_dep)$community)))[V(g_dep)$community]
+# # Let's plot the graph with K-means community colors
+# plot(g_dep, vertex.color = node_colors, vertex.size = 5, vertex.label = NA, 
+#      main = "Community Detection with K-means", edge.arrow.size = 0.5)
+
+
+########## plot the average number of degrees over time
 edges_temp <- data.frame(from = merged_data$repo_id, to = merged_data$dep_id, stringsAsFactors = FALSE)
 edges_temp <- edges_temp[!is.na(edges_temp$to), ]
 
