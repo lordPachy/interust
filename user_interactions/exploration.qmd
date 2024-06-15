@@ -46,6 +46,15 @@ library(ranger)
 library(gmodels)
 #install.packages('h2o')
 library(h2o)
+#install.packages("latex2exp")
+library(latex2exp)
+#install.packages('showtext')
+library(showtext)
+#install.packages('extrafont')
+library('extrafont')
+font_add_google("Raleway")
+#font_import('raleway', '/home/pachy/Downloads/Raleway/static/Raleway-Regular.ttf')
+showtext_auto()
 ```
 
 ## Importing data
@@ -1217,8 +1226,46 @@ users_aggregate_cluster = users_aggregate_log[, 'cluster' := km$cluster]
 ## A graph of clusters
 
 ```{r}
-ggplot(users_aggregate_cluster, aes(working_activity, social_popularity, colour = cluster)) + geom_point()
+clusters_plot = ggplot(users_aggregate_cluster, aes(working_activity, social_popularity, colour = factor(cluster))) + geom_point() +
+  labs(title = "Users by working activity and social popularity",
+       x = "Working activity score",
+       y = "Social popularity score"
+       ) +
+  scale_x_continuous(breaks = 1:4, labels = c("1", "10", "100", "1000")) + 
+  scale_y_continuous(breaks = 1:4, labels = c("1", "10", "100", "1000")) + 
+  scale_color_manual(values = c("#44ac9e", "#a83232", "#9ca832", "#ee7027"),
+                       breaks = 4:1,
+                       labels = c('Top users', 'Newbies', 'Ants', 'Businessmen')
+                       ) +
+  theme(axis.line = element_line(arrow = arrow(angle = 20, length = unit(.10,"inches"),type = "closed")),
+      axis.title.x = element_text(face = 'plain', size = 40),
+      axis.title.y = element_text(face = 'plain', size = 40),
+     text = element_text('Raleway', face = 'bold', size = 50),
+     panel.background = element_rect(fill = "gray92", colour = NA),
+     #title.text = element_text('NewCenturySchoolBook') + 
+  )  +
+  labs(colour = "Cluster")
 ```
+ '#44ac9e', high = '#ee7027'
+
+```{r}
+ggsave(
+  '/home/pachy/Desktop/ACSAI/interust/graphs/clusterplot.png',
+  plot = clusters_plot,
+  device = NULL,
+  path = NULL,
+  scale = 1,
+  width = 2100,
+  height = 1296,
+  units = c("px"),
+  dpi = 300,
+  limitsize = TRUE,
+  bg = NULL,
+  create.dir = FALSE
+)
+```
+
+
 
 
 ```{r}
@@ -1633,6 +1680,37 @@ g_degree_table = g_degree_table[, .N, by = g_degree]
 g_degree_table[order(g_degree)]
 
 ggplot(data = g_degree_table, aes(x = g_degree, y = N)) + geom_point() + scale_x_log10() + scale_y_log10()
+
+degree_plot = ggplot(g_degree_table[g_degree > 0], aes(x = g_degree, y = N, colour = N)) + geom_point() +
+  scale_x_log10(limits = c(1, NA)) + scale_y_log10() +
+  labs(title = "In-degree of the followers network",
+       x = "Number of followers",
+       y = "Frequency"
+       ) +
+  scale_color_gradient(low =  '#44ac9e', high = '#ee7027', guide = 'none', trans = 'log') +
+  theme(axis.line = element_line(arrow = arrow(angle = 20, length = unit(.10,"inches"),type = "closed")),
+      axis.title.x = element_text(face = 'plain', size = 40),
+      axis.title.y = element_text(face = 'plain', size = 40),
+     text = element_text('Raleway', face = 'bold', size = 50),
+     panel.background = element_rect(fill = "gray92", colour = NA),
+     #title.text = element_text('NewCenturySchoolBook')
+  )
+```
+```{r}
+ggsave(
+  '/home/pachy/Desktop/ACSAI/interust/graphs/degreeplot.png',
+  plot = degree_plot,
+  device = NULL,
+  path = NULL,
+  scale = 1,
+  width = 2328,
+  height = 1437,
+  units = c("px"),
+  dpi = 300,
+  limitsize = TRUE,
+  bg = NULL,
+  create.dir = FALSE
+)
 ```
 
 
@@ -1915,7 +1993,33 @@ usage_sample_by_timepassed = usage_sample[, .(stars = mean(stars_diff), commits 
 
 usage_sample_by_timepassed = usage_sample_by_timepassed[, ratio := stars/commits]
 usage_sample_by_timepassed
-ggplot(usage_sample_by_timepassed, aes(timestamp_diff, ratio)) + geom_point()
+stars_plot = ggplot(usage_sample_by_timepassed, aes(timestamp_diff, ratio, colour = timestamp_diff)) + geom_point() +
+  labs(title = "Ratio of stars over commits at the passing of time",
+       x = "Age of the repository in months",
+       y = TeX(r"($\frac{stars}{commits}$)")
+       ) +
+  scale_color_gradient(low =  '#44ac9e', high = '#ee7027', guide = 'none') +
+  theme(axis.line = element_line(arrow = arrow(angle = 20, length = unit(.10,"inches"),type = "closed")),
+      axis.title.x = element_text(face = 'plain', size = 40),
+      axis.title.y = element_text(face = 'plain', size = 40),
+     text = element_text('Raleway', face = 'bold', size = 50),
+     panel.background = element_rect(fill = "gray92", colour = NA),
+     #title.text = element_text('NewCenturySchoolBook')
+  )
+ggsave(
+  '/home/pachy/Desktop/ACSAI/interust/graphs/starsplot.png',
+  plot = stars_plot,
+  device = NULL,
+  path = NULL,
+  scale = 1,
+  width = 2328,
+  height = 1437,
+  units = c("px"),
+  dpi = 300,
+  limitsize = TRUE,
+  bg = NULL,
+  create.dir = FALSE
+)
 ```
 We can even try do it time-step by time-step
 
@@ -2127,7 +2231,7 @@ distance_sponsored_topg_reversed = distances(graph = g,
 
 rownames(distance_sponsored_topg)
 distance_sponsored_topg_reversed[is.infinite(distance_sponsored_topg_reversed)] = NA
-distance_st_min_rev = apply(distance_sponsored_topg_reversed, 1, FUN = mean, na.rm= T)
+distance_st_min_rev = apply(distance_sponsored_topg_reversed, 1, FUN = min, na.rm= T)
 distance_st_min_rev
 distance_st_min_rev = setDT(data.frame(distance_st_min_rev))
 distance_st_min_rev
@@ -2141,7 +2245,7 @@ nrow(distance_st_min_rev[distance == Inf])
 And now, we can actually plot it
 
 ```{r}
-ggplot(distance_st_min_rev, aes(distance)) + geom_density()
+ggplot(distance_st_min_rev, aes(distance)) + geom_histogram()
 ```
 
 
@@ -2189,18 +2293,18 @@ distance_sponsored_influencers_reversed = distances(graph = g,
 rownames(distance_sponsored_topg)
 distance_sponsored_influencers_reversed
 distance_sponsored_influencers_reversed[is.infinite(distance_sponsored_influencers_reversed)] = NA
-distance_si_min_rev = apply(distance_sponsored_influencers_reversed, 1, FUN = mean, na.rm = T)
+distance_si_min_rev = apply(distance_sponsored_influencers_reversed, 1, FUN = min, na.rm = T)
 distance_si_min_rev
 distance_si_min_rev = setDT(data.frame(distance_si_min_rev))
 distance_si_min_rev
 setnames(distance_si_min_rev, 'distance_si_min_rev', 'distance')
 colnames(distance_si_min_rev)
 nrow(distance_si_min_rev[distance == Inf])
-#distance_si_min_rev[distance == Inf]$distance = 6
+distance_si_min_rev[distance == Inf]$distance = 6
 ```
 
 ```{r}
-ggplot(distance_si_min_rev, aes(distance)) + geom_density()
+ggplot(distance_si_min_rev, aes(distance)) + geom_histogram(aes(y = ..count../sum(..count..)))
 ```
 
 #A bit of exploration on the graph
