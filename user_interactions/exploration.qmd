@@ -55,6 +55,7 @@ library('extrafont')
 font_add_google("Raleway")
 #font_import('raleway', '/home/pachy/Downloads/Raleway/static/Raleway-Regular.ttf')
 showtext_auto()
+library(plyr)
 ```
 
 ## Importing data
@@ -1696,6 +1697,7 @@ degree_plot = ggplot(g_degree_table[g_degree > 0], aes(x = g_degree, y = N, colo
      #title.text = element_text('NewCenturySchoolBook')
   )
 ```
+
 ```{r}
 ggsave(
   '/home/pachy/Desktop/ACSAI/interust/graphs/degreeplot.png',
@@ -2275,8 +2277,63 @@ nrow(distance_st_min_rev[distance == Inf])
 ```
 
 ```{r}
-ggplot(distance_at_min_rev, aes(distance)) + geom_histogram()
+distance_at_min_rev$type = F
+distance_st_min_rev$type = T
+
+distance_tu_all = do.call(rbind, list(distance_st_min_rev, distance_at_min_rev))
+distance_tu_all = distance_tu_all[, .N, by = c('distance', 'type')]
+distance_tu_all[is.infinite(distance)]$distance = 10
+distance_tu_all
+nrow(distance_at_min_rev)
+distance_tu_all = distance_tu_all[, N := as.double(N)]
+distance_tu_all$prob = as.double(0)
+distance_tu_all[type == T]$prob = distance_tu_all[type == T]$N / nrow(distance_st_min_rev)
+distance_tu_all[type == F]$prob = distance_tu_all[type == F]$N / nrow(distance_at_min_rev)
+distance_tu_all
+
+distance_top = ggplot(distance_tu_all, aes(x = distance, y = prob, group = type, fill = type)) +
+  geom_col(position = 'dodge') + 
+  labs(title = "Distance from a top user: sponsored vs general case",
+       x = "Distance from a top user",
+       y = "Relative frequency",
+       
+       ) +
+  scale_x_continuous(breaks = 0:10, labels = c("0\n(proportion of\n top users)", "1", "2", "3", "4",
+                                               "5", "6", "7", "8", "9", "No\nconnection")) + 
+  scale_y_continuous(limits = c(0, NA)) +
+  scale_fill_manual(name = 'User type',
+                        values = c("#44ac9e", "#ee7027"),
+                       labels = c('Population', 'Sponsored users')
+                       ) +
+  theme(axis.line = element_line(arrow = arrow(angle = 20, length = unit(.10,"inches"),type = "closed")),
+      axis.title.x = element_text(face = 'plain', size = 40),
+      axis.title.y = element_text(face = 'plain', size = 40),
+     text = element_text('Raleway', face = 'bold', size = 50),
+     panel.background = element_rect(fill = "gray92", colour = NA),
+     #title.text = element_text('NewCenturySchoolBook')
+  )
 ```
+
+
+
+```{r}
+ggsave(
+  '/home/pachy/Desktop/ACSAI/interust/graphs/distancetop.png',
+  plot = distance_top,
+  device = NULL,
+  path = NULL,
+  scale = 1,
+  width = 2625,
+  height = 1620,
+  units = c("px"),
+  dpi = 300,
+  limitsize = TRUE,
+  bg = NULL,
+  create.dir = FALSE
+)
+```
+
+
 WOW!!!
 
 ## From influencers
@@ -2301,11 +2358,82 @@ setnames(distance_si_min_rev, 'distance_si_min_rev', 'distance')
 colnames(distance_si_min_rev)
 nrow(distance_si_min_rev[distance == Inf])
 distance_si_min_rev[distance == Inf]$distance = 6
+
 ```
 
 ```{r}
-ggplot(distance_si_min_rev, aes(distance)) + geom_histogram(aes(y = ..count../sum(..count..)))
+distance_all_busm_reversed = distances(graph = g,
+               to = V(g)[cluster == 4],
+               mode = 'in'
+               )
+
+distance_all_busm_reversed[is.infinite(distance_all_busm_reversed)] = 10
+distance_ai_min_rev = apply(distance_all_busm_reversed, 1, FUN = min, na.rm= T)
+distance_ai_min_rev
+distance_ai_min_rev = setDT(data.frame(distance_ai_min_rev))
+distance_ai_min_rev
+setnames(distance_ai_min_rev, 'distance_ai_min_rev', 'distance')
+colnames(distance_ai_min_rev)
+nrow(distance_ai_min_rev[distance == Inf])
+#distance_st_min_rev[distance == Inf]$distance = 6
 ```
+
+```{r}
+distance_ai_min_rev$type = F
+distance_si_min_rev$type = T
+
+distance_busm_all = do.call(rbind, list(distance_si_min_rev, distance_ai_min_rev))
+distance_busm_all = distance_busm_all[, .N, by = c('distance', 'type')]
+distance_busm_all[is.infinite(distance)]$distance = 10
+distance_busm_all[type == T & distance == 6]$distance = 10
+nrow(distance_busm_all)
+distance_busm_all = distance_busm_all[, N := as.double(N)]
+distance_busm_all$prob = as.double(0)
+distance_busm_all[type == T]$prob = distance_busm_all[type == T]$N / nrow(distance_si_min_rev)
+distance_busm_all[type == F]$prob = distance_busm_all[type == F]$N / nrow(distance_ai_min_rev)
+distance_busm_all
+
+distance_busm = ggplot(distance_busm_all, aes(x = distance, y = prob, group = type, fill = type)) +
+  geom_col(position = 'dodge') + 
+  labs(title = "Distance from a businessman: sponsored vs general case",
+       x = "Distance from a businessman user",
+       y = "Relative frequency",
+       
+       ) +
+  scale_x_continuous(breaks = 0:10, labels = c("0\n(proportion of\n businessmen)", "1", "2", "3", "4",
+                                               "5", "6", "7", "8", "9", "No\nconnection")) + 
+  scale_y_continuous(limits = c(0, NA)) +
+  scale_fill_manual(name = 'User type',
+                        values = c("#44ac9e", "#ee7027"),
+                       labels = c('Population', 'Sponsored users')
+                       ) +
+  theme(axis.line = element_line(arrow = arrow(angle = 20, length = unit(.10,"inches"),type = "closed")),
+      axis.title.x = element_text(face = 'plain', size = 40),
+      axis.title.y = element_text(face = 'plain', size = 40),
+     text = element_text('Raleway', face = 'bold', size = 50),
+     panel.background = element_rect(fill = "gray92", colour = NA),
+     #title.text = element_text('NewCenturySchoolBook')
+  )
+```
+
+
+```{r}
+ggsave(
+  '/home/pachy/Desktop/ACSAI/interust/graphs/distancebusm.png',
+  plot = distance_busm,
+  device = NULL,
+  path = NULL,
+  scale = 1,
+  width = 2625,
+  height = 1620,
+  units = c("px"),
+  dpi = 300,
+  limitsize = TRUE,
+  bg = NULL,
+  create.dir = FALSE
+)
+```
+
 
 #A bit of exploration on the graph
 ## Are the groups following reciprocals?
@@ -2382,12 +2510,42 @@ We can now plot the distribution of the hubs scores: to which groups do they bel
 
 ```{r}
 users_network_info = users_network_info[order(-users_network_info$hub_score)]
-ggplot(users_network_info[1:100, ], aes(cluster)) +
-  geom_histogram(theme()) +
+hb_score = ggplot(users_network_info[1:100, ], aes(factor(cluster), fill = factor(cluster))) +
+  geom_bar(fill = c("#ee7027", "#9ca832","#a83232", "#44ac9e")) +
   ylab('Hub score') + 
-  scale_x_continuous(name ="Type of user",
-                     labels=c('1' = "Influencers", '2' = "Ants", '3'= "Small users", '4'= "Top users"))
+  scale_x_discrete(name ="Type of user",
+                     labels=c('1' = "Businessmen", '2' = "Ants", '3'= "Newbies", '4'= "Top users")) +
+  labs(title = "Top 100 users for hub score: which group do they belong to?",
+         x = "User group",
+         y = "Frequency"
+         ) +
+  theme(axis.line.y = element_line(arrow = arrow(angle = 20, length = unit(.10,"inches"),type = "closed")),
+        axis.line.x = element_line(arrow = arrow(angle = 0, length = unit(.10,"inches"), type = 'closed')),
+      axis.title.x = element_text(face = 'plain', size = 40),
+      axis.title.y = element_text(face = 'plain', size = 40),
+     text = element_text('Raleway', face = 'bold', size = 50),
+     panel.background = element_rect(fill = "gray92", colour = NA),
+     #title.text = element_text('NewCenturySchoolBook')
+  )
 ```
+
+```{r}
+ggsave(
+  '/home/pachy/Desktop/ACSAI/interust/graphs/hbscore.png',
+  plot = hb_score,
+  device = NULL,
+  path = NULL,
+  scale = 1,
+  width = 2600,
+  height = 1437,
+  units = c("px"),
+  dpi = 300,
+  limitsize = TRUE,
+  bg = NULL,
+  create.dir = FALSE
+)
+```
+
 
 ```{r}
 as = authority_score(g)
@@ -2409,17 +2567,84 @@ We can now plot the distribution of the hubs scores: to which groups do they bel
 
 ```{r}
 users_network_info = users_network_info[order(-users_network_info$authority_score)]
-ggplot(users_network_info[1:500, ], aes(cluster)) +
-  geom_histogram(aes(colour = cluster)) +
-  ylab('Top 500 per authority score') + 
-  scale_x_continuous(name ="Type of user",
-                     labels=c('1' = "Influencers", '2' = "Ants", '3'= "Small users", '4'= "Top users"))
+
+auth_score = ggplot(users_network_info[1:100], aes(factor(cluster, levels = c(1, 2, 3, 4)), fill = factor(cluster, levels = c(1, 2, 3, 4)))) +
+  scale_x_discrete(name ="Type of user",
+                     labels=c('1' = "Businessmen", '2' = "Ants", '3'= "Newbies", '4'= "Top users"),
+                   drop = FALSE) +
+  geom_bar(fill = c("#ee7027","#44ac9e")) +
+  labs(title = "Top 100 users for authority score: which group do they belong to?",
+         x = "User group",
+         y = "Frequency"
+         ) +
+  theme(axis.line.y = element_line(arrow = arrow(angle = 20, length = unit(.10,"inches"),type = "closed")),
+        axis.line.x = element_line(arrow = arrow(angle = 0, length = unit(.10,"inches"), type = 'closed')),
+      axis.title.x = element_text(face = 'plain', size = 40),
+      axis.title.y = element_text(face = 'plain', size = 40),
+     text = element_text('Raleway', face = 'bold', size = 50),
+     panel.background = element_rect(fill = "gray92", colour = NA),
+     #title.text = element_text('NewCenturySchoolBook')
+  )
 ```
 
 ```{r}
-out_degree =  users_aggregate_cluster[, mean(n_following), by = cluster]
-out_degree
+ggsave(
+  '/home/pachy/Desktop/ACSAI/interust/graphs/authscore.png',
+  plot = auth_score,
+  device = NULL,
+  path = NULL,
+  scale = 1,
+  width = 2800,
+  height = 1437,
+  units = c("px"),
+  dpi = 300,
+  limitsize = TRUE,
+  bg = NULL,
+  create.dir = FALSE
+)
 ```
+
+```{r}
+out_degree =  users_aggregate_cluster[order(-n_following)]
+out_degree = ggplot(out_degree[1:100], aes(factor(cluster, levels = c(1, 2, 3, 4)), fill = factor(cluster, levels = c(1, 2, 3, 4)))) +
+  scale_x_discrete(name ="Type of user",
+                     labels=c('1' = "Businessmen", '2' = "Ants", '3'= "Newbies", '4'= "Top users"),
+                   drop = FALSE) +
+  geom_bar(fill = c("#ee7027", "#9ca832","#a83232","#44ac9e")) +
+  labs(title = "Top 100 users by followers: which group do they belong to?",
+         x = "User group",
+         y = "Frequency"
+         ) +
+  theme(axis.line.y = element_line(arrow = arrow(angle = 20, length = unit(.10,"inches"),type = "closed")),
+        axis.line.x = element_line(arrow = arrow(angle = 0, length = unit(.10,"inches"), type = 'closed')),
+      axis.title.x = element_text(face = 'plain', size = 40),
+      axis.title.y = element_text(face = 'plain', size = 40),
+     text = element_text('Raleway', face = 'bold', size = 50),
+     panel.background = element_rect(fill = "gray92", colour = NA),
+     #title.text = element_text('NewCenturySchoolBook')
+  )
+```
+
+```{r}
+ggsave(
+  '/home/pachy/Desktop/ACSAI/interust/graphs/outdegree.png',
+  plot = out_degree,
+  device = NULL,
+  path = NULL,
+  scale = 1,
+  width = 2800,
+  height = 1437,
+  units = c("px"),
+  dpi = 300,
+  limitsize = TRUE,
+  bg = NULL,
+  create.dir = FALSE
+)
+```
+```
+
+
+
 ```{r}
 distance_inf_topg = distances(graph = g,
                v = V(g)[V(g)$cluster == 1],
